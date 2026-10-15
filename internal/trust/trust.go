@@ -48,6 +48,9 @@ type Config struct {
 	MaxOrderCents int64
 	// EnrollmentSecret authorizes agent installs at the agent provider.
 	EnrollmentSecret string
+	// Authorize, when set, is the shop's check that what the person
+	// approved matches what the shop offered them (and their mission).
+	Authorize func(scope, ps, sub string) error
 	// HTTPClient is used for discovery (nil: aauth.DiscoveryClient).
 	HTTPClient *http.Client
 	// Insecure accepts http://localhost identifiers (tests only).
@@ -146,6 +149,12 @@ func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest
 	rc := req.Resource
 	amount, ok := spend.AmountFromScope(rc.Scope)
 	if !ok {
+		if r.cfg.Authorize != nil {
+			if err := r.cfg.Authorize(rc.Scope, rc.PS, rc.Subject); err != nil {
+				r.cfg.Log("Chip In AS", "DENY: "+err.Error())
+				return accessserver.Deny(err.Error()), nil
+			}
+		}
 		return accessserver.Allow(""), nil // not a payment
 	}
 	order := spend.OrderFromScope(rc.Scope)
@@ -172,6 +181,12 @@ func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest
 	if b := r.cfg.DailyBudgetCents; b > 0 && sp.cents+amount > b {
 		r.cfg.Log("Chip In AS", fmt.Sprintf("DENY %s for order %s: over the daily budget (%s of %s used)", spend.Dollars(amount), short(order), spend.Dollars(sp.cents), spend.Dollars(b)))
 		return accessserver.Deny(fmt.Sprintf("%s exceeds your Chip In daily budget: %s of %s left", spend.Dollars(amount), spend.Dollars(b-sp.cents), spend.Dollars(b))), nil
+	}
+	if r.cfg.Authorize != nil {
+		if err := r.cfg.Authorize(rc.Scope, rc.PS, rc.Subject); err != nil {
+			r.cfg.Log("Chip In AS", fmt.Sprintf("DENY %s for order %s: %v", spend.Dollars(amount), short(order), err))
+			return accessserver.Deny(err.Error()), nil
+		}
 	}
 	sp.cents += amount
 	r.spent[who] = sp

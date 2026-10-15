@@ -22,6 +22,7 @@ import (
 	"github.com/aauth-dev/aauth-go/agentprovider"
 
 	"github.com/gkedev/adelaide/internal/payments"
+	"github.com/gkedev/adelaide/internal/selection"
 	"github.com/gkedev/adelaide/internal/shop"
 	"github.com/gkedev/adelaide/internal/spend"
 	"github.com/gkedev/adelaide/internal/trust"
@@ -37,11 +38,16 @@ type Config struct {
 	// OnInteraction shows the person where to sign in or approve (URL and
 	// code); nil logs it.
 	OnInteraction func(url, code string)
+	// Packs, Brands and BudgetCents (the max cost) are the player's
+	// choices: they become the selection mission Keycard enforces.
+	Packs  []string
+	Brands []string
 	// Query, TargetBalls and BudgetCents describe the errand.
 	Query       string
 	TargetBalls int
 	BudgetCents int64
-	// TryOverBudget first attempts the best per-ball deal even when it
+	// TryOverBudget first attempts a tempting product outside the mission,
+	// to show it refused at checkout. (Historically: the best per-ball deal even when it
 	// exceeds the budget, to show the person server refusing it.
 	TryOverBudget bool
 	// Wallet issues the shared payment token; nil pays with the shop's
@@ -118,10 +124,18 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	log(fmt.Sprintf("enrolled as %s (person server %s)", id.String(), cfg.PSURL))
 
 	ps := aauth.NewPSClient(cfg.PSURL, agent)
-	ps.HTTPClient = cfg.HTTPClient
+	ps.HTTPClient = &http.Client{Timeout: 10 * time.Minute, Transport: capabilityRT{
+		ps: strings.TrimSuffix(cfg.PSURL, "/"), capabilities: []string{"interaction"}, agent: agent, base: cfg.HTTPClient.Transport,
+	}}
 	ps.PreferWaitSeconds = 30
-	md, err := ps.Discover(ctx)
-	if err != nil {
+	ps.OnRequirement = func(r aauth.Requirement) {
+		if r.URL != "" && cfg.OnInteraction != nil {
+			cfg.OnInteraction(r.URL, r.Code)
+		} else if r.URL != "" {
+			cfg.Log("Person", fmt.Sprintf("sign in and approve at %s (code %s)", r.URL, r.Code))
+		}
+	}
+	if _, err := ps.Discover(ctx); err != nil {
 		return nil, fmt.Errorf("discover %s: %w", cfg.PSURL, err)
 	}
 	interact := cfg.OnInteraction
@@ -162,33 +176,51 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	for store, e := range found.Errors {
 		log(fmt.Sprintf("%s did not answer: %s", store, e))
 	}
-	best, value := choose(found.Offers, cfg.TargetBalls, cfg.BudgetCents)
-	if best == nil {
-		return nil, fmt.Errorf("no offer gives %d balls within %s (%d offers, %s)", cfg.TargetBalls, spend.Dollars(cfg.BudgetCents), len(found.Offers), found.Source)
-	}
-	log(fmt.Sprintf("%d offers (%s). Plan: %d × %s at %s = %s (%s/ball)",
-		len(found.Offers), found.Source, best.qty, best.offer.Title, best.offer.Store,
-		spend.Dollars(best.cost()), spend.Dollars(best.offer.PerBallCents())))
+	log(fmt.Sprintf("%d offers (%s)", len(found.Offers), found.Source))
+	shopping := newMCP("")
 
-	// 3. A mission with a budget, when the person server supports missions.
-	mission := ""
-	if md.MissionEndpoint != "" {
-		desc := fmt.Sprintf("# Tennis balls for Monday night doubles\n\nBuy at least %d pressurized tennis balls at Chip In, best price per ball.\n\n%s\n",
-			cfg.TargetBalls, spend.BudgetLine(cfg.BudgetCents))
-		prop := aauth.MissionProposal{Description: desc}
-		if strings.HasPrefix(cfg.ShopURL, "https://") {
-			prop.Resources = []string{cfg.ShopURL} // server identifiers only (§8.1)
-		}
-		m, err := ps.ProposeMission(ctx, prop)
-		if err != nil {
-			return nil, fmt.Errorf("propose mission: %w", err)
-		}
-		mission, res.Mission = m.S256, m.S256
-		log(fmt.Sprintf("mission approved: %s… (budget %s)", m.S256[:12], spend.Dollars(cfg.BudgetCents)))
-	} else {
-		log("person server has no missions: each order is approved on its own")
+	// 3. The player's choices become a selection mission across the stores.
+	var prop struct {
+		Mission selection.Mission `json:"mission"`
+		Summary string            `json:"summary"`
+		Source  string            `json:"source"`
 	}
-	shopping := newMCP(mission)
+	if err := shopping.tool(ctx, "mission_propose", map[string]any{
+		"packs": cfg.Packs, "brands": cfg.Brands, "max_cost_usd": float64(cfg.BudgetCents) / 100,
+	}, &prop); err != nil {
+		return nil, fmt.Errorf("mission_propose: %w", err)
+	}
+	log(fmt.Sprintf("mission proposed: %s → %d products (%s)", prop.Summary, len(prop.Mission.Products), prop.Source))
+	for i, p := range prop.Mission.Products {
+		if i == 6 {
+			log(fmt.Sprintf("  … and %d more", len(prop.Mission.Products)-6))
+			break
+		}
+		log(fmt.Sprintf("  %s · %s · %s", spend.Dollars(p.PriceCents), p.Store, p.Title))
+	}
+
+	// 4. The player approves the mission at their person server.
+	var appr struct {
+		EnforcedBy string `json:"enforced_by"`
+	}
+	if err := shopping.tool(ctx, "mission_approve", map[string]any{"mission_id": prop.Mission.ID}, &appr); err != nil {
+		return nil, fmt.Errorf("mission_approve: %w", err)
+	}
+	res.Mission = prop.Mission.ID
+	log("mission approved; enforced by " + appr.EnforcedBy)
+
+	var inMission []ucp.Offer
+	for _, p := range prop.Mission.Products {
+		inMission = append(inMission, ucp.Offer{ID: p.OfferID, Store: p.Store, Title: p.Title, PriceCents: p.PriceCents,
+			Currency: spend.Currency, Available: true, Balls: 3 * p.Cans, Cans: p.Cans, Brand: p.Brand})
+	}
+	best, _ := choose(inMission, cfg.TargetBalls, cfg.BudgetCents)
+	if best == nil {
+		return nil, fmt.Errorf("no mission product gives %d balls within %s", cfg.TargetBalls, spend.Dollars(cfg.BudgetCents))
+	}
+	log(fmt.Sprintf("plan: %d × %s at %s = %s (%s/ball)", best.qty, best.offer.Title, best.offer.Store,
+		spend.Dollars(best.cost()), spend.Dollars(best.offer.PerBallCents())))
+	value := offMission(found.Offers, prop.Mission.Criteria)
 
 	pay := func(label string) (*shop.Order, error) {
 		var quote struct {
@@ -221,18 +253,18 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		return &o, nil
 	}
 
-	// 3b. Optionally show the guardrail: the best per-ball deal, over budget.
-	if cfg.TryOverBudget && value != nil && value.cost() > cfg.BudgetCents {
-		log(fmt.Sprintf("trying the best per-ball deal anyway: %s at %s for %s (%s/ball)",
-			value.offer.Title, value.offer.Store, spend.Dollars(value.cost()), spend.Dollars(value.offer.PerBallCents())))
+	// 4b. Optionally show the guardrail: a tempting product outside the mission.
+	if cfg.TryOverBudget && value != nil {
+		log(fmt.Sprintf("trying a product outside the mission: %s (%s, %s) at %s for %s",
+			value.offer.Title, orDefault(value.offer.Brand, "unknown brand"), packName(value.offer.Cans), value.offer.Store, spend.Dollars(value.cost())))
 		if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": value.offer.ID, "quantity": value.qty}, nil); err != nil {
 			return nil, fmt.Errorf("cart_add: %w", err)
 		}
-		if _, err := pay("over budget on purpose"); err != nil {
+		if _, err := pay("outside the mission on purpose"); err != nil {
 			res.Denials = append(res.Denials, err.Error())
 			log("refused, as it should be: " + shortErr(err))
 		} else {
-			return nil, errors.New("an over-budget checkout was authorized")
+			return nil, errors.New("a checkout outside the mission was authorized")
 		}
 		if err := shopping.tool(ctx, "cart_remove", map[string]any{"offer_id": value.offer.ID}, nil); err != nil {
 			return nil, fmt.Errorf("cart_remove: %w", err)
@@ -243,29 +275,48 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": best.offer.ID, "quantity": best.qty}, nil); err != nil {
 		return nil, fmt.Errorf("cart_add: %w", err)
 	}
-	order, err := pay("within budget")
+	order, err := pay("within the mission")
 	if err != nil {
 		return nil, fmt.Errorf("checkout: %w", err)
 	}
 	res.Order = order
 	log(fmt.Sprintf("paid: order %s, %s, Stripe %s %s", order.ID, spend.Dollars(order.TotalCents), orNone(order.PaymentIntent), order.PaymentStatus))
 
-	// 5. Report to the person and close the mission, when there is one.
-	if mission != "" {
-		if err := ps.Audit(ctx, aauth.AuditRequest{
-			MissionS256: mission, Action: "Purchase",
-			Description: fmt.Sprintf("Bought %d × %s from Chip In for %s", best.qty, best.offer.Title, spend.Dollars(order.TotalCents)),
-			Result:      map[string]any{"order_id": order.ID, "order_hash": order.OrderHash, "payment_intent": order.PaymentIntent, "total_cents": order.TotalCents},
-		}); err != nil {
-			return nil, fmt.Errorf("audit: %w", err)
-		}
-		summary := fmt.Sprintf("Bought %d balls for %s (order %s).", best.qty*best.offer.Balls, spend.Dollars(order.TotalCents), order.ID)
-		if err := ps.CompleteMission(ctx, mission, summary); err != nil {
-			return nil, fmt.Errorf("complete mission: %w", err)
-		}
-		log("mission complete")
-	}
 	return res, nil
+}
+
+// offMission is the most tempting pressurized product the catalog search
+// found that the mission does not allow (cheapest per ball), one unit.
+func offMission(offers []ucp.Offer, c selection.Criteria) *plan {
+	any := selection.Criteria{Brands: selection.Brands, Packs: []string{"can", "12", "18", "24"}, MaxCostCents: 1 << 40}
+	var best *plan
+	for _, o := range offers {
+		if !any.Matches(o) || c.Matches(o) || o.Balls <= 0 {
+			continue
+		}
+		if best == nil || o.PerBallCents() < best.offer.PerBallCents() {
+			best = &plan{offer: o, qty: 1}
+		}
+	}
+	return best
+}
+
+func packName(cans int) string {
+	switch p := selection.PackOf(cans); p {
+	case "":
+		return "not a can pack"
+	case "can":
+		return "single can"
+	default:
+		return p + "-can pack"
+	}
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
 }
 
 // plan is a quantity of one offer.

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -39,7 +40,9 @@ import (
 
 	aauth "github.com/aauth-dev/aauth-go"
 
+	"github.com/gkedev/adelaide/internal/keycard"
 	"github.com/gkedev/adelaide/internal/payments"
+	"github.com/gkedev/adelaide/internal/selection"
 	"github.com/gkedev/adelaide/internal/spend"
 	"github.com/gkedev/adelaide/internal/ucp"
 )
@@ -64,6 +67,12 @@ type Config struct {
 	TrustedIssuers []string
 	// Catalog searches the stores.
 	Catalog *ucp.Client
+	// Selections holds selection missions (created when nil).
+	Selections *selection.Registry
+	// Keycard, when set, enforces each player's mission: approving a
+	// selection publishes its Cedar policy, and every order line is
+	// evaluated by Keycard. Without it the same rules are checked locally.
+	Keycard *keycard.Client
 	// Stripe charges payments; nil runs checkout without charging
 	// (reported as "payment: skipped").
 	Stripe *payments.Stripe
@@ -91,6 +100,7 @@ type Shop struct {
 	revoked map[[2]string]bool // (iss, jti) revoked at the shop
 	pending map[string]*Offer  // order hash → the order offered in a resource token
 	paid    map[string]bool    // order hashes already paid
+	spent   map[string]int64   // selection mission id → cents paid under it
 }
 
 type cart struct {
@@ -107,6 +117,7 @@ type Offer struct {
 	Items      []OfferLine `json:"items"`
 	TotalCents int64       `json:"total_cents"`
 	Currency   string      `json:"currency"`
+	Selection  string      `json:"selection"` // the approved selection mission it falls under
 	Nonce      string      `json:"nonce"`
 }
 
@@ -116,6 +127,8 @@ type OfferLine struct {
 	Store     string `json:"store"`
 	Title     string `json:"title"`
 	VariantID string `json:"variant_id"`
+	Brand     string `json:"brand"`
+	Cans      int    `json:"cans"`
 	UnitCents int64  `json:"unit_cents"`
 	Quantity  int    `json:"quantity"`
 }
@@ -174,7 +187,10 @@ func New(cfg Config) (*Shop, error) {
 		resolver: aauth.NewJWKSResolver(cfg.HTTPClient),
 		trusted:  map[string]bool{},
 		offers:   map[string]ucp.Offer{}, carts: map[string]*cart{}, revoked: map[[2]string]bool{},
-		pending: map[string]*Offer{}, paid: map[string]bool{},
+		pending: map[string]*Offer{}, paid: map[string]bool{}, spent: map[string]int64{},
+	}
+	if s.cfg.Selections == nil {
+		s.cfg.Selections = selection.NewRegistry()
 	}
 	for _, iss := range cfg.TrustedIssuers {
 		s.trusted[iss] = true
@@ -202,6 +218,81 @@ func (s *Shop) Register(mux *http.ServeMux) {
 		_, _ = w.Write(ucpAgentProfile)
 	})
 	mux.HandleFunc("GET /orders/{hash}", s.serveOrder)
+	mux.HandleFunc("GET /missions/{id}", s.serveMission)
+}
+
+// serveMission shows a selection mission: the choices and the products
+// they authorize.
+func (s *Shop) serveMission(w http.ResponseWriter, r *http.Request) {
+	m, ok := s.cfg.Selections.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mission": m, "summary": m.Criteria.Summary()})
+}
+
+// Authorize is Chip In's check, for its access server, that a scope the
+// person (ps, sub) approved matches what Chip In offered them: a selection
+// mission they proposed, or an order that falls entirely within their
+// approved selection and its max cost.
+func (s *Shop) Authorize(scope, ps, sub string) error {
+	shopper := ps + "|" + sub
+	if selection.IsApproval(scope) {
+		m, ok := s.cfg.Selections.Get(selection.FromScope(scope))
+		if !ok || m.Shopper != shopper {
+			return errors.New("no such selection for this person")
+		}
+		return nil
+	}
+	amount, ok := spend.AmountFromScope(scope)
+	if !ok {
+		return nil
+	}
+	s.mu.Lock()
+	o := s.pending[spend.OrderFromScope(scope)]
+	s.mu.Unlock()
+	if o == nil || o.Shopper != shopper || o.TotalCents != amount {
+		return errors.New("Chip In made no such offer to this person")
+	}
+	m, ok := s.cfg.Selections.Get(o.Selection)
+	if !ok || m.Status != "approved" || m.Shopper != shopper || selection.FromScope(scope) != m.ID {
+		return errors.New("the order is not under an approved selection")
+	}
+	s.mu.Lock()
+	spent := s.spent[m.ID]
+	s.mu.Unlock()
+	return s.enforceMission(m, o, spent+amount)
+}
+
+// enforceMission applies the player's choices to every order line: brand,
+// pack size, and the mission's total spending against its max cost. Keycard
+// decides when configured; otherwise the same rules run here.
+func (s *Shop) enforceMission(m *selection.Mission, o *Offer, totalCents int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, l := range o.Items {
+		pack := selection.PackOf(l.Cans)
+		desc := fmt.Sprintf("%s (brand %s, pack %s, mission total %s)", l.Title, orDefault(l.Brand, "unknown"), orDefault(pack, "not a can pack"), spend.Dollars(totalCents))
+		if s.cfg.Keycard != nil && m.KeycardPolicyID != "" {
+			d, err := s.cfg.Keycard.Evaluate(ctx, &keycard.Policy{ID: m.KeycardPolicyID}, keycard.Scopes(m.ID, keycard.Line{Brand: l.Brand, Pack: pack}, totalCents))
+			if err != nil {
+				return fmt.Errorf("Keycard unavailable: %w", err)
+			}
+			if !d.Allow {
+				s.cfg.Log("Keycard", fmt.Sprintf("DENY %s: outside mission policy %s", desc, m.KeycardPolicyName))
+				return fmt.Errorf("Keycard denied: %s is outside your mission (%s)", desc, m.Criteria.Summary())
+			}
+			s.cfg.Log("Keycard", fmt.Sprintf("ALLOW %s under %s", desc, m.KeycardPolicyName))
+			continue
+		}
+		c := m.Criteria
+		if !slices.Contains(c.Brands, l.Brand) || !slices.Contains(c.Packs, pack) || totalCents > c.MaxCostCents {
+			s.cfg.Log("Chip In", "DENY (local mission rules) "+desc)
+			return fmt.Errorf("outside your mission: %s (%s)", desc, c.Summary())
+		}
+	}
+	return nil
 }
 
 // ServeHTTP serves the shop's routes alone (tests, single-role use).
@@ -272,9 +363,9 @@ func toolTier(method, tool string) tier {
 		return tierAgent
 	}
 	switch tool {
-	case "cart_add", "cart_view", "cart_remove", "checkout_quote":
+	case "cart_add", "cart_view", "cart_remove", "checkout_quote", "mission_propose":
 		return tierPerson
-	case "checkout_authorize", "checkout_pay":
+	case "checkout_authorize", "checkout_pay", "mission_approve":
 		return tierAuth
 	}
 	return tierAgent
@@ -315,7 +406,7 @@ func (s *Shop) serveMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	need := toolTier(req.Method, req.Params.Name)
-	c, ok := s.authenticate(w, r, need, req.Params.Name)
+	c, ok := s.authenticate(w, r, need, req.Params.Name, req.Params.Arguments)
 	if !ok {
 		return
 	}
@@ -348,7 +439,7 @@ func (s *Shop) serveMCP(w http.ResponseWriter, r *http.Request) {
 
 // authenticate verifies the presented token and, when it proves less than
 // need, answers the AAuth challenge for the next token (§6.4, §6.5).
-func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, tool string) (*caller, bool) {
+func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, tool string, args json.RawMessage) (*caller, bool) {
 	ctx := r.Context()
 	tok, err := aauth.ParseSignatureKey(r)
 	if err != nil {
@@ -389,7 +480,7 @@ func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, t
 		}
 		c := &caller{Shopper: pc.Issuer + "|" + pc.Subject}
 		if need == tierAuth {
-			s.challengeCheckout(w, c.Shopper, pc)
+			s.challengeFor(w, tool, args, c.Shopper, pc)
 			return nil, false
 		}
 		return c, true
@@ -412,20 +503,62 @@ func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, t
 			return nil, false
 		}
 		c := &caller{Shopper: ac.PS + "|" + ac.Subject, Auth: ac}
-		if need == tierAuth {
-			o := s.currentOffer(c.Shopper)
-			amount, ok := spend.AmountFromScope(ac.Scope)
-			if o == nil || !ok || amount != o.TotalCents || spend.OrderFromScope(ac.Scope) != o.Hash() {
-				// This token approved a different order (the cart changed):
-				// step up for the order the cart holds now.
-				s.challengeCheckout(w, c.Shopper, ac)
-				return nil, false
-			}
+		if need == tierAuth && !s.grants(tool, args, c.Shopper, ac.Scope) {
+			// This token approved something else (another order, another
+			// selection): step up for what this call needs.
+			s.challengeFor(w, tool, args, c.Shopper, ac)
+			return nil, false
 		}
 		return c, true
 	}
 	aauth.ChallengeAgentToken(w)
 	return nil, false
+}
+
+// grants reports whether an auth token's scope covers this call.
+func (s *Shop) grants(tool string, args json.RawMessage, shopper, scope string) bool {
+	if tool == "mission_approve" {
+		return selection.IsApproval(scope) && selection.FromScope(scope) == missionArg(args)
+	}
+	o := s.currentOffer(shopper)
+	amount, ok := spend.AmountFromScope(scope)
+	return o != nil && ok && amount == o.TotalCents && spend.OrderFromScope(scope) == o.Hash()
+}
+
+// challengeFor answers requirement=auth-token for what tool needs.
+func (s *Shop) challengeFor(w http.ResponseWriter, tool string, args json.RawMessage, shopper string, presented aauth.PresentedToken) {
+	if tool != "mission_approve" {
+		s.challengeCheckout(w, shopper, presented)
+		return
+	}
+	m, ok := s.cfg.Selections.Get(missionArg(args))
+	if !ok || m.Shopper != shopper {
+		writeRPCError(w, nil, -32602, "unknown mission_id: propose one with mission_propose")
+		return
+	}
+	s.challenge(w, selection.Scope(m), presented, fmt.Sprintf("selection mission %s: %s, %d products → requirement=auth-token", short(m.ID), m.Criteria.Summary(), len(m.Products)))
+}
+
+func missionArg(args json.RawMessage) string {
+	var a struct {
+		MissionID string `json:"mission_id"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return a.MissionID
+}
+
+// challenge issues a resource token for scope, addressed to Chip In's
+// access server, and answers requirement=auth-token.
+func (s *Shop) challenge(w http.ResponseWriter, scope string, presented aauth.PresentedToken, msg string) {
+	rt, err := aauth.IssueResourceToken(aauth.ResourceTokenParams{
+		Resource: s.cfg.URL, Audience: s.cfg.AccessServer, Scope: scope,
+	}, presented, s.key, s.kid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.cfg.Log("Chip In", msg)
+	aauth.ChallengeAuthToken(w, rt)
 }
 
 // challengeCheckout answers requirement=auth-token with a resource token
@@ -437,20 +570,16 @@ func (s *Shop) challengeCheckout(w http.ResponseWriter, shopper string, presente
 		writeRPCError(w, nil, -32602, "your cart is empty")
 		return
 	}
+	if o.Selection == "" {
+		writeRPCError(w, nil, -32602, "approve a selection mission first (mission_propose, mission_approve)")
+		return
+	}
 	hash := o.Hash()
 	s.mu.Lock()
 	s.pending[hash] = o
 	s.mu.Unlock()
-	scope := spend.OrderScope(o.TotalCents, hash)
-	rt, err := aauth.IssueResourceToken(aauth.ResourceTokenParams{
-		Resource: s.cfg.URL, Audience: s.cfg.AccessServer, Scope: scope,
-	}, presented, s.key, s.kid)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.cfg.Log("Chip In", fmt.Sprintf("offer %s: %d line(s), %s → requirement=auth-token (aud %s)", short(hash), len(o.Items), spend.Dollars(o.TotalCents), s.cfg.AccessServer))
-	aauth.ChallengeAuthToken(w, rt)
+	scope := spend.OrderScope(o.TotalCents, hash) + " selection:" + o.Selection
+	s.challenge(w, scope, presented, fmt.Sprintf("offer %s: %d line(s), %s under selection %s → requirement=auth-token", short(hash), len(o.Items), spend.Dollars(o.TotalCents), short(o.Selection)))
 }
 
 func (s *Shop) isRevoked(iss, jti string) bool {
@@ -468,13 +597,22 @@ func (s *Shop) currentOffer(shopper string) *Offer {
 		return nil
 	}
 	o := &Offer{Merchant: s.cfg.URL, Shopper: shopper, TotalCents: total(c), Currency: spend.Currency, Nonce: c.Nonce}
+	if m, ok := s.activeSelection(shopper); ok {
+		o.Selection = m.ID
+	}
 	items := append([]Item(nil), c.Items...)
 	sort.Slice(items, func(i, j int) bool { return items[i].Offer.ID < items[j].Offer.ID })
 	for _, it := range items {
 		o.Items = append(o.Items, OfferLine{OfferID: it.Offer.ID, Store: it.Offer.Store, Title: it.Offer.Title,
-			VariantID: it.Offer.VariantID, UnitCents: it.Offer.PriceCents, Quantity: it.Quantity})
+			VariantID: it.Offer.VariantID, Brand: it.Offer.Brand, Cans: it.Offer.Cans, UnitCents: it.Offer.PriceCents, Quantity: it.Quantity})
 	}
 	return o
+}
+
+// activeSelection is the shopper's approved selection mission. It takes
+// no shop lock (the registry has its own), so it is safe under s.mu.
+func (s *Shop) activeSelection(shopper string) (*selection.Mission, bool) {
+	return s.cfg.Selections.Active(shopper)
 }
 
 func newNonce() string {
@@ -496,10 +634,14 @@ func total(c *cart) int64 {
 
 func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.RawMessage) (any, error) {
 	var args struct {
-		Query        string `json:"query"`
-		OfferID      string `json:"offer_id"`
-		Quantity     int    `json:"quantity"`
-		PaymentToken string `json:"payment_token"`
+		Query        string   `json:"query"`
+		OfferID      string   `json:"offer_id"`
+		Quantity     int      `json:"quantity"`
+		PaymentToken string   `json:"payment_token"`
+		Packs        []string `json:"packs"`
+		Brands       []string `json:"brands"`
+		MaxCostUSD   float64  `json:"max_cost_usd"`
+		MissionID    string   `json:"mission_id"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -509,6 +651,25 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 	switch name {
 	case "catalog_search":
 		return s.search(ctx, args.Query)
+	case "mission_propose":
+		return s.propose(ctx, c.Shopper, selection.Criteria{Packs: args.Packs, Brands: args.Brands, MaxCostCents: int64(args.MaxCostUSD*100 + 0.5)})
+	case "mission_approve":
+		if err := s.cfg.Selections.Approve(args.MissionID, c.Auth.PS); err != nil {
+			return nil, err
+		}
+		m, _ := s.cfg.Selections.Get(args.MissionID)
+		s.cfg.Log("Chip In", fmt.Sprintf("selection %s approved by the person at %s: %s", short(m.ID), c.Auth.PS, m.Criteria.Summary()))
+		if s.cfg.Keycard != nil {
+			pol, err := s.cfg.Keycard.Publish(ctx, keycard.Mission{ID: m.ID, Summary: m.Criteria.Summary(),
+				Brands: m.Criteria.Brands, Packs: m.Criteria.Packs, MaxCostCents: m.Criteria.MaxCostCents})
+			if err != nil {
+				return nil, err
+			}
+			s.cfg.Selections.SetKeycardPolicy(m.ID, pol.ID, pol.Name)
+			m, _ = s.cfg.Selections.Get(args.MissionID)
+			s.cfg.Log("Keycard", fmt.Sprintf("published Cedar policy %s for the mission: %s", pol.Name, m.Criteria.Summary()))
+		}
+		return map[string]any{"mission": m, "summary": m.Criteria.Summary(), "enforced_by": orDefault(m.KeycardPolicyName, "Chip In (local rules)")}, nil
 	case "cart_add":
 		return s.cartAdd(c.Shopper, args.OfferID, args.Quantity)
 	case "cart_view", "checkout_quote":
@@ -548,10 +709,46 @@ func (s *Shop) search(ctx context.Context, query string) (any, error) {
 	return map[string]any{"source": src, "offers": res.Offers, "store_errors": res.Errors}, nil
 }
 
+// propose builds a selection mission: searches every chosen brand across
+// the UCP stores and keeps the products that match the player's choices.
+func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria) (any, error) {
+	c, err := c.Normalize()
+	if err != nil {
+		return nil, err
+	}
+	var all []ucp.Offer
+	src := "live (UCP)"
+	for _, b := range c.Brands {
+		res, err := s.cfg.Catalog.Search(ctx, b+" tennis balls")
+		if err != nil {
+			s.cfg.Log("Chip In", fmt.Sprintf("search %q failed: %v", b, err))
+			continue
+		}
+		if res.Recorded {
+			src = "recorded fixture"
+		}
+		all = append(all, res.Offers...)
+	}
+	s.mu.Lock()
+	for _, o := range all {
+		s.offers[o.ID] = o
+	}
+	s.mu.Unlock()
+	m := selection.New(shopper, c, all)
+	if len(m.Products) == 0 {
+		return nil, fmt.Errorf("no products match %s (%d offers searched, %s)", c.Summary(), len(all), src)
+	}
+	s.cfg.Selections.Put(m)
+	s.cfg.Log("Chip In", fmt.Sprintf("selection proposed: %s → %d of %d offers across the UCP stores (%s)", c.Summary(), len(m.Products), len(all), src))
+	return map[string]any{"mission": m, "summary": c.Summary(), "approval_scope": selection.Scope(m),
+		"mission_url": s.cfg.URL + "/missions/" + m.ID, "source": src}, nil
+}
+
 func (s *Shop) cartAdd(shopper, offerID string, qty int) (any, error) {
 	if qty <= 0 {
 		qty = 1
 	}
+	m, hasMission := s.activeSelection(shopper)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o, ok := s.offers[offerID]
@@ -561,6 +758,10 @@ func (s *Shop) cartAdd(shopper, offerID string, qty int) (any, error) {
 	if !o.Available {
 		return nil, fmt.Errorf("%s is out of stock at %s", o.Title, o.Store)
 	}
+	if !hasMission {
+		return nil, errors.New("approve a selection mission first (mission_propose, mission_approve)")
+	}
+	_ = m // the mission is enforced at checkout, by Keycard
 	c := s.carts[shopper]
 	if c == nil {
 		c = &cart{}
@@ -667,6 +868,7 @@ func (s *Shop) pay(ctx context.Context, c *caller, spt string) (any, error) {
 		}
 	}
 	s.mu.Lock()
+	s.spent[offer.Selection] += amount
 	s.orders = append(s.orders, o)
 	delete(s.carts, c.Shopper)
 	s.mu.Unlock()
@@ -698,6 +900,14 @@ func toolList() []map[string]any {
 	return []map[string]any{
 		{"name": "catalog_search", "description": "Search live tennis ball offers at Tennis Express and Holabird Sports (UCP). Needs: agent token.",
 			"inputSchema": obj(map[string]any{"query": str("what to look for, e.g. 'Penn Championship extra duty'")})},
+		{"name": "mission_propose", "description": "Propose a product-selection mission from the player's choices; returns the matching products across the UCP stores. Needs: person token.",
+			"inputSchema": obj(map[string]any{
+				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"can", "12", "18", "24"}}, "description": "pack sizes in cans"},
+				"brands":       map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.Brands}},
+				"max_cost_usd": map[string]any{"type": "number", "description": "most to spend under the mission"},
+			}, "packs", "brands", "max_cost_usd")},
+		{"name": "mission_approve", "description": "Have the player approve the selection at their person server; afterwards only its products can be bought. Needs: auth token for the mission.",
+			"inputSchema": obj(map[string]any{"mission_id": str("id from mission_propose")}, "mission_id")},
 		{"name": "cart_add", "description": "Add an offer to your cart. Needs: person token.",
 			"inputSchema": obj(map[string]any{"offer_id": str("an id from catalog_search"), "quantity": map[string]any{"type": "integer", "minimum": 1}}, "offer_id")},
 		{"name": "cart_view", "description": "Show your cart. Needs: person token.", "inputSchema": obj(map[string]any{})},

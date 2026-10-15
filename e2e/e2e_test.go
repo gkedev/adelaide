@@ -146,9 +146,11 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	ps.Register(psMux)
 	*psH = psMux
 
+	var sh *shop.Shop
 	roles, err := trust.New(trust.Config{
-		Issuer: chipSrv.URL, PS: psSrv.URL, AgentDomain: "agents.chipin.localhost",
-		DailyBudgetCents: 6000, MaxOrderCents: maxOrderCents, EnrollmentSecret: "install-7",
+		Authorize: func(scope, ps, sub string) error { return sh.Authorize(scope, ps, sub) },
+		Issuer:    chipSrv.URL, PS: psSrv.URL, AgentDomain: "agents.chipin.localhost",
+		MaxOrderCents: maxOrderCents, EnrollmentSecret: "install-7",
 		HTTPClient: hc, Insecure: true, Log: log,
 	})
 	if err != nil {
@@ -156,10 +158,10 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	}
 
 	te := fakeStore(t,
-		product("te1", "Championship Extra Duty Tennis Ball Can", 399),
-		product("te2", "Championship Extra Duty Tennis Ball Case", 8995))
+		product("te1", "Championship Extra Duty Tennis Ball Can", 399), // Penn (product line), single can
+		product("te2", "Pro Penn Marathon Extra Duty Tennis Ball Case", 8995))
 	hb := fakeStore(t,
-		product("hb1", "Penn CONTROL+ Bag of 12", 1995),
+		product("hb1", "Dunlop ATP Championship Regular Duty 24 Cans", 4999), // cheap per ball, but Dunlop
 		product("hb2", "Wilson Starter Foam Ball 6 Pack", 2395))
 	catalog := &ucp.Client{Profile: "https://demo.example/ucp-agent.json", Stores: []ucp.Store{
 		{Name: "Tennis Express", Domain: "te.example", Code: "te", Endpoint: te},
@@ -173,7 +175,7 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	if live != nil {
 		st = live
 	}
-	sh, err := shop.New(shop.Config{
+	sh, err = shop.New(shop.Config{
 		URL: chipSrv.URL, AccessServer: chipSrv.URL, TrustedIssuers: []string{psSrv.URL, chipSrv.URL},
 		Catalog: catalog, Stripe: st, HTTPClient: hc, Insecure: true, Log: log,
 	})
@@ -191,6 +193,7 @@ func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Resul
 	cfg := agent.Config{
 		ShopURL: d.shopURL, APURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
 		TargetBalls: 24, BudgetCents: 6000, TryOverBudget: true, Wallet: d.wallet,
+		Packs: []string{"can", "24"}, Brands: []string{"Penn"},
 		HTTPClient: &http.Client{Timeout: 20 * time.Second}, Insecure: true, Log: d.log,
 	}
 	if mutate != nil {
@@ -203,42 +206,47 @@ func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Resul
 	return res, err
 }
 
-func TestPurchaseApprovedPerOrder(t *testing.T) {
+func TestSelectionMission(t *testing.T) {
 	d := deploy(t, 15000)
 	res, err := d.run(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The case ($89.95) is the best per-ball deal but over the $60 daily
-	// budget: Chip In's access server refuses it.
-	if len(res.Denials) != 1 || !strings.Contains(res.Denials[0], "daily budget") {
+	// The player chose Penn, single cans or 24-can cases, up to $60. The
+	// Dunlop case is cheaper per ball but outside the mission: refused.
+	if len(res.Denials) != 1 || !strings.Contains(res.Denials[0], "outside your mission") || !strings.Contains(res.Denials[0], "Dunlop") {
 		t.Fatalf("denials %q", res.Denials)
 	}
-	// 8 cans × $3.99 = $31.92 is the cheapest way to 24 balls.
+	// 8 Penn cans × $3.99 = $31.92 (the Penn case, $89.95, is over the max cost).
 	o := res.Order
 	if o == nil || o.TotalCents != 3192 || o.PaidWith != "shared_payment_token" || o.PaymentStatus != "succeeded" || o.OrderHash == "" {
 		t.Fatalf("order %+v", o)
 	}
-	if o.AuthorizedBy != d.shopURL {
-		t.Fatalf("authorized by %q, want Chip In's access server", o.AuthorizedBy)
-	}
-	if len(d.stripe.payments) != 1 || d.stripe.payments[0]["amount"] != "3192" || d.stripe.payments[0]["idem"] != o.OrderHash {
-		t.Fatalf("stripe payments %v", d.stripe.payments)
-	}
-	if len(d.stripe.caps) != 1 {
-		t.Fatalf("%d shared payment tokens minted, want 1 (none for the refused order)", len(d.stripe.caps))
+	if len(d.stripe.payments) != 1 || d.stripe.payments[0]["idem"] != o.OrderHash || len(d.stripe.caps) != 1 {
+		t.Fatalf("stripe payments %v caps %v", d.stripe.payments, d.stripe.caps)
 	}
 	for _, want := range []string{
-		"requirement=person-token",
-		"G signs in and links agent",
-		"G approves order",
-		"DENY $89.95 for order",
+		"selection proposed: Penn · 24-can pack, single can · up to $60.00 → 1 of",
+		"G approves", // the mission, at the person server
+		"selection " + res.Mission[:10],
+		"DENY (local mission rules) Dunlop ATP Championship",
 		"Chip In AS ALLOW $31.92 for order " + o.OrderHash[:10],
-		"person server has no missions",
 	} {
 		if !strings.Contains(d.trace.String(), want) {
 			t.Errorf("trace lacks %q", want)
 		}
+	}
+}
+
+// TestNoMissionNoCheckout: without an approved selection, nothing can be paid.
+func TestNoMissionNoCheckout(t *testing.T) {
+	d := deploy(t, 15000)
+	_, err := d.run(t, func(c *agent.Config) { c.Brands = []string{"Tecnifibre"} })
+	if err == nil || !strings.Contains(err.Error(), "no products match") {
+		t.Fatalf("err %v", err)
+	}
+	if len(d.stripe.payments) != 0 {
+		t.Fatal("charged without a mission")
 	}
 }
 

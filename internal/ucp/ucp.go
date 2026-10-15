@@ -55,6 +55,13 @@ type Offer struct {
 	// Balls is the number of balls the variant contains, guessed from its
 	// title ("24 Cans" is 72); zero when unknown.
 	Balls int `json:"balls,omitempty"`
+	// Cans is the number of 3-ball cans (1 for a can, 24 for a case); zero
+	// when the listing is not sold in cans.
+	Cans int `json:"cans,omitempty"`
+	// Brand is the ball brand, from the title, the store's tags, and known
+	// product lines; "" when unknown.
+	Brand string   `json:"brand,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
 }
 
 // PerBallCents is the price per ball, or zero when Balls is unknown.
@@ -293,9 +300,10 @@ type money struct {
 }
 
 type product struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	URL        string `json:"url"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	URL        string   `json:"url"`
+	Tags       []string `json:"tags"`
 	PriceRange struct {
 		Min money `json:"min"`
 	} `json:"price_range"`
@@ -312,7 +320,7 @@ type product struct {
 // without variants becomes one offer at its minimum price.
 func (p product) offers(s Store) []Offer {
 	if len(p.Variants) == 0 {
-		return []Offer{newOffer(s, p.ID, p.ID, p.Title, p.URL, p.PriceRange.Min, true)}
+		return []Offer{newOffer(s, p.ID, p.ID, p.Title, p.URL, p.PriceRange.Min, true, p.Tags)}
 	}
 	var out []Offer
 	for _, v := range p.Variants {
@@ -324,12 +332,12 @@ func (p product) offers(s Store) []Offer {
 		if u == "" {
 			u = p.URL
 		}
-		out = append(out, newOffer(s, p.ID, v.ID, title, u, v.Price, available(v.Availability)))
+		out = append(out, newOffer(s, p.ID, v.ID, title, u, v.Price, available(v.Availability), p.Tags))
 	}
 	return out
 }
 
-func newOffer(s Store, productID, variantID, title, u string, price money, avail bool) Offer {
+func newOffer(s Store, productID, variantID, title, u string, price money, avail bool, tags []string) Offer {
 	sum := sha256.Sum256([]byte(s.Domain + "|" + variantID))
 	return Offer{
 		ID:         s.Code + "-" + hex.EncodeToString(sum[:])[:8],
@@ -342,7 +350,59 @@ func newOffer(s Store, productID, variantID, title, u string, price money, avail
 		Currency:   strings.ToLower(price.Currency),
 		Available:  avail,
 		Balls:      BallsInTitle(title),
+		Cans:       CansInTitle(title),
+		Brand:      BrandOf(title, tags),
+		Tags:       tags,
 	}
+}
+
+// Brands the demo knows, and product lines whose titles omit the brand.
+var (
+	brands     = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson", "Babolat", "Head", "Yonex", "Diadem", "Gamma", "Tourna"}
+	brandLines = map[string]string{"us open": "Wilson", "triniti": "Wilson", "championship": "Penn", "marathon": "Penn",
+		"tour extra": "Penn", "tour regular": "Penn", "grand prix": "Dunlop", "atp": "Dunlop", "x-one": "Tecnifibre", "court": "Tecnifibre"}
+)
+
+// BrandOf names the brand of a listing: a brand in the title wins, then a
+// brand tag, then a known product line ("US Open" is Wilson).
+func BrandOf(title string, tags []string) string {
+	t := strings.ToLower(title)
+	for _, b := range brands {
+		if strings.Contains(t, strings.ToLower(b)) {
+			return b
+		}
+	}
+	for _, tag := range tags {
+		for _, b := range brands {
+			if strings.EqualFold(strings.TrimSpace(tag), b) {
+				return b
+			}
+		}
+	}
+	for line, b := range brandLines {
+		if strings.Contains(t, line) {
+			return b
+		}
+	}
+	return ""
+}
+
+var reNCans = regexp.MustCompile(`(?i)\b(\d+)[\s-]*cans?\b`)
+
+// CansInTitle is the number of cans a listing holds: "24 Cans" 24, "4-Can
+// Pack" 4, "Case" 24, "Can" 1; zero when it is not sold in cans.
+func CansInTitle(title string) int {
+	if m := reNCans.FindStringSubmatch(title); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	switch {
+	case reCase.MatchString(title):
+		return 24
+	case reCan.MatchString(title):
+		return 1
+	}
+	return 0
 }
 
 // available reads UCP availability, which stores send as an object

@@ -33,6 +33,7 @@ import (
 	aauth "github.com/aauth-dev/aauth-go"
 
 	"github.com/gkedev/adelaide/internal/agent"
+	"github.com/gkedev/adelaide/internal/keycard"
 	"github.com/gkedev/adelaide/internal/keys"
 	"github.com/gkedev/adelaide/internal/localps"
 	"github.com/gkedev/adelaide/internal/payments"
@@ -50,7 +51,7 @@ type options struct {
 	envFile, profile, fixture, pay   string
 	budget, dailyBudget, maxOrder    float64
 	balls                            int
-	query                            string
+	query, packs, brands             string
 	guardrail                        bool
 	enrollment, shopURL              string
 	out                              string
@@ -73,12 +74,14 @@ func main() {
 	fs.StringVar(&o.profile, "ucp-profile", env("UCP_AGENT_PROFILE", ""), "UCP agent profile URL sent to stores (default: {origin}"+shop.UCPProfilePath+")")
 	fs.StringVar(&o.fixture, "catalog-fixture", env("CHIPIN_CATALOG_FIXTURE", ""), "answer catalog searches from this recorded file")
 	fs.StringVar(&o.pay, "pay", env("CHIPIN_PAY", "spt"), "payment: spt (shared payment token), card (test card), none")
-	fs.Float64Var(&o.budget, "budget", 60, "agent: most the agent plans to spend, USD")
-	fs.Float64Var(&o.dailyBudget, "daily-budget", envFloat("CHIPIN_DAILY_BUDGET", 60), "serve: most one person may spend per day at Chip In, USD")
+	fs.Float64Var(&o.budget, "max-cost", 60, "agent: the player's max cost for the mission, USD")
+	fs.StringVar(&o.packs, "packs", "can,24", "agent: the player's pack sizes (can, 12, 18, 24)")
+	fs.StringVar(&o.brands, "brands", "Penn,Dunlop", "agent: the player's brands (Dunlop, Penn, Tecnifibre, Wilson)")
+	fs.Float64Var(&o.dailyBudget, "daily-budget", envFloat("CHIPIN_DAILY_BUDGET", 0), "serve: most one person may spend per day at Chip In, USD (0: no daily limit)")
 	fs.Float64Var(&o.maxOrder, "max-order", envFloat("CHIPIN_MAX_ORDER", 150), "serve: per-order cap, USD")
 	fs.IntVar(&o.balls, "balls", 24, "agent: balls the crew needs")
 	fs.StringVar(&o.query, "query", "tennis balls", "agent: catalog search")
-	fs.BoolVar(&o.guardrail, "show-guardrail", true, "agent: first try the best per-ball deal even when over budget, to show the refusal")
+	fs.BoolVar(&o.guardrail, "show-guardrail", true, "agent: first try a product outside the mission, to show the refusal")
 	fs.StringVar(&o.enrollment, "enrollment-secret", env("CHIPIN_ENROLLMENT_SECRET", ""), "agent enrollment secret")
 	fs.StringVar(&o.shopURL, "shop", env("CHIPIN_SHOP_URL", "https://chipin.aauth.tech"), "agent: Chip In origin")
 	fs.StringVar(&o.out, "out", "testdata/catalog.json", "record-catalog: output file")
@@ -134,8 +137,10 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	if insecure {
 		domain = "agents.chipin.localhost"
 	}
+	var sh *shop.Shop
 	roles, err := trust.New(trust.Config{
-		Issuer: origin, ShopURL: origin, PS: ps, AgentDomain: domain,
+		Authorize: func(scope, ps, sub string) error { return sh.Authorize(scope, ps, sub) },
+		Issuer:    origin, ShopURL: origin, PS: ps, AgentDomain: domain,
 		APKey: apKey, ASKey: asKey,
 		DailyBudgetCents: cents(o.dailyBudget), MaxOrderCents: cents(o.maxOrder),
 		EnrollmentSecret: o.enrollment, HTTPClient: hc, Insecure: insecure, Log: log,
@@ -156,8 +161,13 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 			return nil, fmt.Errorf("catalog fixture: %w", err)
 		}
 	}
-	sh, err := shop.New(shop.Config{
-		Key: shopKey, URL: origin, AccessServer: origin, TrustedIssuers: []string{ps, origin},
+	var kc *keycard.Client
+	if os.Getenv("KEYCARD_CLIENT_ID") != "" && !insecure {
+		kc = &keycard.Client{ZoneID: os.Getenv("KEYCARD_ZONE_ID"), ClientID: os.Getenv("KEYCARD_CLIENT_ID"),
+			ClientSecret: os.Getenv("KEYCARD_CLIENT_SECRET"), Origin: origin}
+	}
+	sh, err = shop.New(shop.Config{
+		Keycard: kc, Key: shopKey, URL: origin, AccessServer: origin, TrustedIssuers: []string{ps, origin},
 		Catalog: catalog, Stripe: stripe, HTTPClient: hc, Insecure: insecure, Log: log,
 	})
 	if err != nil {
@@ -206,8 +216,12 @@ func serve(o options) error {
 		return err
 	}
 	srv := &http.Server{Addr: o.listen, Handler: h.handler, ReadHeaderTimeout: 10 * time.Second}
-	log("Chip In", fmt.Sprintf("serving %s on %s · person server %s · payment %s · daily budget %s · max order %s",
-		o.origin, o.listen, o.ps, o.pay, spend.Dollars(cents(o.dailyBudget)), spend.Dollars(cents(o.maxOrder))))
+	enforcer := "local rules"
+	if os.Getenv("KEYCARD_CLIENT_ID") != "" {
+		enforcer = "Keycard zone " + os.Getenv("KEYCARD_ZONE_ID")
+	}
+	log("Chip In", fmt.Sprintf("serving %s on %s · person server %s · payment %s · missions enforced by %s · max order %s",
+		o.origin, o.listen, o.ps, o.pay, enforcer, spend.Dollars(cents(o.maxOrder))))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	sig := make(chan os.Signal, 1)
@@ -284,6 +298,7 @@ func agentConfig(o options, shopURL, ps string, wallet *payments.Stripe, insecur
 	return agent.Config{
 		ShopURL: shopURL, APURL: shopURL, PSURL: ps, EnrollmentSecret: o.enrollment,
 		Query: o.query, TargetBalls: o.balls, BudgetCents: cents(o.budget), TryOverBudget: o.guardrail,
+		Packs: splitList(o.packs), Brands: splitList(o.brands),
 		Wallet: wallet, Insecure: insecure, Log: log,
 	}
 }
@@ -397,6 +412,16 @@ func envFloat(k string, def float64) float64 {
 		return f
 	}
 	return def
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func randomHex() string {

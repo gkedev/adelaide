@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chip In · AAuth sequence</title>
+<meta name="description" content="How Chip In's shopping agent buys tennis balls: Hellō approval, a Keycard-enforced selection mission, UCP stores, and a Stripe shared payment token.">
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#2a2f3a; --fg:#e8eaf0; --muted:#9aa3b2; --accent:#7ee0b8; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif }
+  main { max-width:1480px; margin:0 auto; padding:36px 24px 64px }
+  h1 { font-size:26px; margin:0 0 6px; letter-spacing:-.01em }
+  .lead { color:var(--muted); margin:0 0 24px; max-width:880px }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 22px }
+  .chip { background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:5px 12px; font-size:13px; color:var(--muted) }
+  .chip b { color:var(--fg); font-weight:600 }
+  .card { background:#fff; border-radius:12px; padding:18px; overflow-x:auto }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; margin-top:26px }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px }
+  .box h3 { margin:0 0 6px; font-size:14px; color:var(--accent) }
+  .box p { margin:0; color:var(--muted); font-size:13.5px }
+  code { font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace; background:#232733; padding:1px 5px; border-radius:4px; color:#d6dbe6 }
+  footer { margin-top:28px; color:var(--muted); font-size:13px }
+  a { color:var(--accent) }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chip In: a shopping agent with a Keycard-enforced mission</h1>
+  <p class="lead">The player picks pack sizes, brands, and a max cost. That choice becomes a <b>selection mission</b> across real UCP stores, approved by the player at their person server (Hellō) and enforced by <b>Keycard</b> as a Cedar policy. Every purchase is a per-call authorization: Chip In's resource token carries the exact order's hash, and the auth token is proof that order was approved. Payment is a Stripe shared payment token capped at that amount.</p>
+
+  <div class="chips">
+    <span class="chip"><b>AAuth</b> draft-11 · aauth-go v0.2</span>
+    <span class="chip"><b>Person server</b> Hellō</span>
+    <span class="chip"><b>Mission enforcement</b> Keycard (Cedar)</span>
+    <span class="chip"><b>Stores</b> Tennis Express · Holabird (UCP)</span>
+    <span class="chip"><b>Payment</b> Stripe SPT (sandbox)</span>
+  </div>
+
+  <div class="card">
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor P as Player (G)
+    participant A as Shopping agent
+    participant C as Chip In (MCP resource)
+    participant AS as Chip In access server
+    participant H as Hellō (person server)
+    participant K as Keycard
+    participant U as UCP stores
+    participant S as Stripe
+
+    Note over A,C: Identity
+    A->>C: enroll (agent provider)
+    C-->>A: agent token (ps = Hellō)
+    A->>C: catalog_search (agent token)
+    C->>U: search_catalog<br/>(UCP agent profile)
+    U-->>C: live offers
+    C-->>A: offers
+
+    Note over P,U: Selection mission: the player's choices
+    A->>C: mission_propose<br/>{packs, brands, max cost}
+    C-->>A: 401 requirement=person-token
+    A->>H: person token request
+    H->>P: sign in, link the agent
+    P-->>H: approve
+    H-->>A: person token (directed sub)
+    A->>C: mission_propose (person token)
+    C->>U: search each chosen brand
+    C-->>A: matching products
+    A->>C: mission_approve (person token)
+    C-->>A: 401 auth-token<br/>resource token "mission:approve"
+    A->>H: auth token request
+    H->>P: approve the mission
+    P-->>H: approve
+    H->>AS: federate (signed by Hellō)
+    AS->>C: the person's own proposal?
+    AS-->>H: auth token
+    H-->>A: auth token
+    A->>C: mission_approve (auth token)
+    C->>K: publish Cedar policy<br/>(brands, packs, max cost)
+    C-->>A: mission active<br/>enforced by Keycard
+
+    Note over A,K: Guardrail: a product outside the mission
+    A->>C: cart_add Dunlop case<br/>checkout_authorize
+    C-->>A: 401 auth-token<br/>resource token (order hash)
+    A->>H: auth token request
+    H->>AS: federate
+    AS->>K: evaluate the order line<br/>(brand, pack, total)
+    K-->>AS: DENY
+    AS-->>H: denied
+    H-->>A: refused<br/>(no payment token minted)
+
+    Note over A,S: Purchase within the mission
+    A->>C: cart_add Penn cans<br/>checkout_authorize
+    C-->>A: 401 auth-token<br/>resource token ($31.92 + order hash)
+    A->>H: auth token request
+    H->>P: approve this order
+    P-->>H: approve
+    H->>AS: federate
+    AS->>C: matches the offer? unpaid?
+    AS->>K: evaluate the order line
+    K-->>AS: ALLOW
+    AS-->>H: auth token (names the order hash)
+    H-->>A: auth token
+    A->>S: shared payment token<br/>capped at the order total
+    A->>C: checkout_pay (auth token, SPT)
+    C->>S: PaymentIntent<br/>(key = order hash)
+    S-->>C: succeeded
+    C-->>A: order paid
+</pre>
+  </div>
+
+  <div class="grid">
+    <div class="box"><h3>Trust grows tool by tool</h3><p><code>catalog_search</code> needs an agent token, the cart and <code>mission_propose</code> a person token, and <code>mission_approve</code> and checkout an auth token for exactly what is approved.</p></div>
+    <div class="box"><h3>Offer and acceptance, both signed</h3><p>Chip In's resource token carries the order's SHA-256 (the offer). The auth token carries the same scope after the player approved (the acceptance). Chip In charges only that order, once.</p></div>
+    <div class="box"><h3>Keycard enforces the mission</h3><p>Approving the selection publishes a Cedar policy in the Keycard zone. Every order line is evaluated by Keycard: brand, pack size, and the mission's total spending against the max cost.</p></div>
+    <div class="box"><h3>The person exists apart from the agent</h3><p>Hellō, not the agent, approves. The agent can't approve its own purchase; it only carries the proof.</p></div>
+  </div>
+
+  <footer>
+    Live at <a href="https://chipin.aauth.tech">chipin.aauth.tech</a> · source <a href="https://github.com/gkedev/adelaide">github.com/gkedev/adelaide</a> ·
+    Open with Hellō: federation to a resource's access server and deferred (202) polling are being confirmed; the live run currently stops at the first interaction.
+  </footer>
+</main>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "default", sequence: { mirrorActors: true, showSequenceNumbers: true, useMaxWidth: true,
+    actorFontSize: 14, messageFontSize: 13, noteFontSize: 13, actorMargin: 28, messageMargin: 30, boxMargin: 6, width: 120 },
+    themeVariables: { fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" } });
+</script>
+</body>
+</html>
