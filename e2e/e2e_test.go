@@ -19,6 +19,7 @@ import (
 	"github.com/gkedev/adelaide/internal/agent"
 	"github.com/gkedev/adelaide/internal/localps"
 	"github.com/gkedev/adelaide/internal/payments"
+	"github.com/gkedev/adelaide/internal/selection"
 	"github.com/gkedev/adelaide/internal/shop"
 	"github.com/gkedev/adelaide/internal/trust"
 	"github.com/gkedev/adelaide/internal/ucp"
@@ -194,7 +195,7 @@ func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Resul
 	cfg := agent.Config{
 		ShopURL: d.shopURL, APURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
 		TargetBalls: 24, BudgetCents: 6000, TryOverBudget: true, Wallet: d.wallet,
-		Packs: []string{"12", "24"}, Brands: []string{"Penn"}, Buy: "best",
+		Case: "12", Brands: []string{"Penn"}, Buy: "best",
 		HTTPClient: &http.Client{Timeout: 20 * time.Second}, Insecure: true, Log: d.log,
 	}
 	if mutate != nil {
@@ -213,7 +214,7 @@ func TestSelectionMission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The player chose Penn, 12- or 24-packs, up to $60. The Dunlop 12-pack
+	// The player chose Penn, 12-can cases, up to $60. The Dunlop 12-can case
 	// is cheaper per ball but outside the mission: refused.
 	if len(res.Denials) != 1 || !strings.Contains(res.Denials[0], "outside your mission") || !strings.Contains(res.Denials[0], "Dunlop") {
 		t.Fatalf("denials %q", res.Denials)
@@ -227,7 +228,7 @@ func TestSelectionMission(t *testing.T) {
 		t.Fatalf("stripe payments %v caps %v", d.stripe.payments, d.stripe.caps)
 	}
 	for _, want := range []string{
-		"selection proposed: Penn · 12-pack, 24-pack · up to $60.00 → 1 of",
+		"selection proposed: Penn · 12-can case · up to $60.00 → 1 of",
 		"G approves", // the mission, at the person server
 		"selection " + res.Mission[:10],
 		"DENY (local mission rules) Dunlop ATP Championship Extra Duty 12 Pack",
@@ -284,6 +285,17 @@ func TestPackSizes(t *testing.T) {
 		if got := ucp.CansInTitle(title); got != want {
 			t.Errorf("%q: %d cans, want %d", title, got, want)
 		}
+	}
+}
+
+// TestOneCaseSize: the player picks exactly one case size.
+func TestOneCaseSize(t *testing.T) {
+	if _, err := (selection.Criteria{Packs: []string{"12", "24"}, Brands: []string{"Penn"}, MaxCostCents: 100}).Normalize(); err == nil {
+		t.Fatal("two case sizes accepted")
+	}
+	c, err := selection.Criteria{Packs: []string{"24-can"}, Brands: []string{"penn"}, MaxCostCents: 100}.Normalize()
+	if err != nil || c.Summary() != "Penn · 24-can case · up to $1.00" {
+		t.Fatalf("%+v %v %q", c, err, c.Summary())
 	}
 }
 

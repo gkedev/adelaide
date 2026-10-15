@@ -639,6 +639,7 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 		Quantity     int      `json:"quantity"`
 		PaymentToken string   `json:"payment_token"`
 		Packs        []string `json:"packs"`
+		Case         string   `json:"case"`
 		Brands       []string `json:"brands"`
 		MaxCostUSD   float64  `json:"max_cost_usd"`
 		MissionID    string   `json:"mission_id"`
@@ -652,7 +653,11 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 	case "catalog_search":
 		return s.search(ctx, args.Query)
 	case "mission_propose":
-		return s.propose(ctx, c.Shopper, selection.Criteria{Packs: args.Packs, Brands: args.Brands, MaxCostCents: int64(args.MaxCostUSD*100 + 0.5)})
+		packs := args.Packs
+		if args.Case != "" {
+			packs = []string{args.Case}
+		}
+		return s.propose(ctx, c.Shopper, selection.Criteria{Packs: packs, Brands: args.Brands, MaxCostCents: int64(args.MaxCostUSD*100 + 0.5)})
 	case "mission_approve":
 		if err := s.cfg.Selections.Approve(args.MissionID, c.Auth.PS); err != nil {
 			return nil, err
@@ -916,12 +921,12 @@ func toolList() []map[string]any {
 	return []map[string]any{
 		{"name": "catalog_search", "description": "Search live tennis ball offers at Tennis Express and Holabird Sports (UCP). Needs: agent token.",
 			"inputSchema": obj(map[string]any{"query": str("what to look for, e.g. 'Penn Championship extra duty'")})},
-		{"name": "mission_propose", "description": "Propose a product-selection mission from the player's choices; returns the matching products across the UCP stores. Needs: person token.",
+		{"name": "mission_propose", "description": "Propose a product-selection mission from the player's choices (brands, one case size, max cost); returns the matching products across the UCP stores. Needs: person token.",
 			"inputSchema": obj(map[string]any{
-				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.PackOrder}, "description": "pack sizes, in cans: 12, 18, 24"},
+				"case":         map[string]any{"type": "string", "enum": selection.PackOrder, "description": "the case size, in cans: 12, 18 or 24"},
 				"brands":       map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.Brands}},
 				"max_cost_usd": map[string]any{"type": "number", "description": "most to spend under the mission"},
-			}, "packs", "brands", "max_cost_usd")},
+			}, "case", "brands", "max_cost_usd")},
 		{"name": "mission_approve", "description": "Have the player approve the selection at their person server; afterwards only its products can be bought. Needs: auth token for the mission.",
 			"inputSchema": obj(map[string]any{"mission_id": str("id from mission_propose")}, "mission_id")},
 		{"name": "cart_add", "description": "Add an offer to your cart. Needs: person token.",

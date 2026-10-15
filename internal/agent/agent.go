@@ -47,9 +47,9 @@ type Config struct {
 	// AuthorizeOnly stops a purchase after Keycard and the access server
 	// approve the order (auth token issued), before any payment.
 	AuthorizeOnly bool
-	// Packs, Brands and BudgetCents (the max cost) are the player's
-	// choices: they become the selection mission Keycard enforces.
-	Packs  []string
+	// Case (12, 18 or 24 cans), Brands and BudgetCents (the max cost) are
+	// the player's choices: they become the mission Keycard enforces.
+	Case   string
 	Brands []string
 	// Query, TargetBalls and BudgetCents describe the errand.
 	Query       string
@@ -200,7 +200,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		Source  string            `json:"source"`
 	}
 	if err := shopping.tool(ctx, "mission_propose", map[string]any{
-		"packs": cfg.Packs, "brands": cfg.Brands, "max_cost_usd": float64(cfg.BudgetCents) / 100,
+		"case": cfg.Case, "brands": cfg.Brands, "max_cost_usd": float64(cfg.BudgetCents) / 100,
 	}, &prop); err != nil {
 		return nil, fmt.Errorf("mission_propose: %w", err)
 	}
@@ -405,7 +405,7 @@ func offMission(offers []ucp.Offer, c selection.Criteria) *plan {
 
 func packName(cans int) string {
 	if p := selection.PackOf(cans); p != "" {
-		return p + "-pack"
+		return p + "-can case"
 	}
 	if cans == 1 {
 		return "single can"

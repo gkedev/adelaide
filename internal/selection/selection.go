@@ -32,9 +32,9 @@ var PackOrder = []string{"12", "18", "24"}
 // Brands a player can choose.
 var Brands = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson"}
 
-// Criteria are the player's choices.
+// Criteria are the player's choices. The player picks one case size.
 type Criteria struct {
-	Packs        []string `json:"packs"`  // "12", "18", "24" (cans)
+	Packs        []string `json:"packs"`  // exactly one case size: "12", "18" or "24" (cans)
 	Brands       []string `json:"brands"` // Brands
 	MaxCostCents int64    `json:"max_cost_cents"`
 }
@@ -48,7 +48,7 @@ func (c Criteria) Normalize() (Criteria, error) {
 			p = strings.TrimSuffix(p, suf)
 		}
 		if _, ok := Packs[p]; !ok {
-			return out, fmt.Errorf("unknown pack %q: choose from 12, 18, 24-pack", p)
+			return out, fmt.Errorf("unknown case size %q: choose 12, 18 or 24 cans", p)
 		}
 		if !slices.Contains(out.Packs, p) {
 			out.Packs = append(out.Packs, p)
@@ -63,8 +63,11 @@ func (c Criteria) Normalize() (Criteria, error) {
 			out.Brands = append(out.Brands, Brands[i])
 		}
 	}
-	if len(out.Packs) == 0 || len(out.Brands) == 0 || c.MaxCostCents <= 0 {
-		return out, errors.New("choose at least one pack size, one brand, and a max cost")
+	if len(out.Packs) != 1 {
+		return out, errors.New("choose one case size: 12, 18 or 24 cans")
+	}
+	if len(out.Brands) == 0 || c.MaxCostCents <= 0 {
+		return out, errors.New("choose at least one brand and a max cost")
 	}
 	slices.SortFunc(out.Packs, func(a, b string) int { return Packs[a] - Packs[b] })
 	slices.Sort(out.Brands)
@@ -101,7 +104,7 @@ func (c Criteria) Matches(o ucp.Offer) bool {
 func (c Criteria) Summary() string {
 	packs := make([]string, len(c.Packs))
 	for i, p := range c.Packs {
-		packs[i] = p + "-pack"
+		packs[i] = p + "-can case"
 	}
 	return fmt.Sprintf("%s · %s · up to %s", strings.Join(c.Brands, ", "), strings.Join(packs, ", "), spend.Dollars(c.MaxCostCents))
 }
