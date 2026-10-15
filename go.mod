@@ -2,13 +2,15 @@ module github.com/gkedev/adelaide
 
 go 1.26.0
 
-require github.com/aauth-dev/aauth-go v0.2.0
+require (
+	github.com/aauth-dev/aauth-go v0.2.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
+)
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dunglas/httpsfv v1.1.2 // indirect
 	github.com/goccy/go-json v0.11.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
 	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect

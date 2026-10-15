@@ -31,6 +31,7 @@ import (
 	"time"
 
 	aauth "github.com/aauth-dev/aauth-go"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gkedev/adelaide/internal/agent"
 	"github.com/gkedev/adelaide/internal/keycard"
@@ -56,6 +57,13 @@ type options struct {
 	enrollment, shopURL              string
 	out                              string
 	jsonOut                          bool
+}
+
+func init() {
+	// Write a single audience as a JSON string, not a one-element array.
+	// Both are valid JWT (RFC 7519 §4.1.3), but Hellō's auth token endpoint
+	// fails on an array aud ("aud.replace is not a function").
+	jwt.MarshalSingleStringAsArray = false
 }
 
 func main() {

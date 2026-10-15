@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	jwtv5 "github.com/golang-jwt/jwt/v5"
 )
 
 // TestHostRoutes builds the one-origin mux (route patterns must not
@@ -27,5 +30,16 @@ func TestHostRoutes(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("GET %s: %d, want %d", path, rec.Code, want)
 		}
+	}
+}
+
+// TestSingleAudienceIsAString: tokens Chip In mints carry aud as a string
+// (Hellō rejects a one-element array); init sets this for the process.
+func TestSingleAudienceIsAString(t *testing.T) {
+	b, _ := json.Marshal(jwtv5.RegisteredClaims{Audience: jwtv5.ClaimStrings{"https://as.example"}})
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	if _, ok := m["aud"].(string); !ok {
+		t.Fatalf("aud marshals as %T: %s", m["aud"], b)
 	}
 }
