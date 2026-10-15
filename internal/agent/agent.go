@@ -53,6 +53,9 @@ type Config struct {
 	// agent keeps one key and name per player.
 	Key       crypto.Signer
 	AgentName string
+	// TryOffer, when set, names the guardrail's product (a title substring)
+	// instead of the cheapest-per-ball product outside the mission.
+	TryOffer string
 	// Case (12, 18 or 24 cans), Brands and BudgetCents (the max cost) are
 	// the player's choices: they become the mission Keycard enforces.
 	Case   string
@@ -252,6 +255,26 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		log(fmt.Sprintf("%s%d. %s/ball · %d × %s at %s = %s", mark, i+1, spend.Dollars(c.PerBallCents), c.Quantity, c.Title, c.Store, spend.Dollars(c.TotalCents)))
 	}
 	value := offMission(found.Offers, prop.Mission.Criteria)
+	if cfg.TryOffer != "" {
+		value = nil
+		var pool []ucp.Offer
+		pool = append(pool, found.Offers...)
+		var more struct {
+			Offers []ucp.Offer `json:"offers"`
+		}
+		if err := browse.tool(ctx, "catalog_search", map[string]any{"query": cfg.TryOffer}, &more); err == nil {
+			pool = append(pool, more.Offers...)
+		}
+		for _, o := range pool {
+			if strings.Contains(strings.ToLower(o.Title), strings.ToLower(cfg.TryOffer)) && !prop.Mission.Criteria.Matches(o) {
+				value = &plan{offer: o, qty: 1}
+				break
+			}
+		}
+		if value == nil {
+			return nil, fmt.Errorf("no off-mission product matches %q", cfg.TryOffer)
+		}
+	}
 
 	pay := func(label string) (*shop.Order, error) {
 		var quote struct {

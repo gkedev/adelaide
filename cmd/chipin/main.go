@@ -55,6 +55,7 @@ type options struct {
 	balls                            int
 	query, packs, brands, buy        string
 	guardrail, authorizeOnly         bool
+	tryOffer                         string
 	enrollment, shopURL              string
 	out                              string
 	jsonOut                          bool
@@ -92,6 +93,7 @@ func main() {
 	fs.IntVar(&o.balls, "balls", 24, "agent: balls the crew needs")
 	fs.StringVar(&o.query, "query", "tennis balls", "agent: catalog search")
 	fs.StringVar(&o.buy, "buy", "", "agent: after the shortlist, buy nothing (default), \"best\", or item N; asks when run in a terminal")
+	fs.StringVar(&o.tryOffer, "try-offer", "", "agent: the guardrail tries this off-mission product (title substring)")
 	fs.BoolVar(&o.guardrail, "show-guardrail", true, "agent: first try a product outside the mission, to show the refusal")
 	fs.StringVar(&o.enrollment, "enrollment-secret", env("CHIPIN_ENROLLMENT_SECRET", ""), "agent enrollment secret")
 	fs.StringVar(&o.shopURL, "shop", env("CHIPIN_SHOP_URL", "https://chipin.aauth.tech"), "agent: ChipIn origin")
@@ -328,7 +330,7 @@ func agentConfig(o options, shopURL, ps string, wallet *payments.Stripe, insecur
 	return agent.Config{
 		ShopURL: shopURL, APURL: shopURL, PSURL: ps, EnrollmentSecret: o.enrollment,
 		Query: o.query, TargetBalls: o.balls, BudgetCents: cents(o.budget), TryOverBudget: o.guardrail,
-		Case: o.packs, Brands: splitList(o.brands), Buy: o.buy, Decide: askPlayer, AuthorizeOnly: o.authorizeOnly,
+		Case: o.packs, Brands: splitList(o.brands), Buy: o.buy, Decide: askPlayer, AuthorizeOnly: o.authorizeOnly, TryOffer: o.tryOffer,
 		Wallet: wallet, Insecure: insecure, Log: log,
 	}
 }
