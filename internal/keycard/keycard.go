@@ -56,14 +56,14 @@ type Mission struct {
 	ID           string
 	Summary      string
 	Brands       []string // "Penn", "Wilson", …
-	Packs        []string // "4", "8", "12", "18", "24" (cans)
+	Packs        []string // "12", "18", "24" (cans)
 	MaxCostCents int64
 }
 
 // Line is one order line to check.
 type Line struct {
 	Brand string
-	Pack  string // "4", "8", "12", "18", "24", or "" when not one of them
+	Pack  string // "12", "18", "24", or "" when not one of them
 }
 
 // Policy is a published mission policy.

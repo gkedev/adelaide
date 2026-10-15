@@ -724,7 +724,7 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 	for _, b := range c.Brands {
 		queries = append(queries, b+" tennis balls")
 	}
-	queries = append(queries, "tennis balls 12 cans", "tennis ball case", "tennis balls 4 pack", "tennis balls 18 cans")
+	queries = append(queries, "tennis balls 12 cans", "tennis ball case", "tennis balls 18 cans")
 	for _, q := range queries {
 		res, err := s.cfg.Catalog.Search(ctx, q)
 		if err != nil {
@@ -918,7 +918,7 @@ func toolList() []map[string]any {
 			"inputSchema": obj(map[string]any{"query": str("what to look for, e.g. 'Penn Championship extra duty'")})},
 		{"name": "mission_propose", "description": "Propose a product-selection mission from the player's choices; returns the matching products across the UCP stores. Needs: person token.",
 			"inputSchema": obj(map[string]any{
-				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.PackOrder}, "description": "pack sizes, in cans: 4, 8, 12, 18, 24"},
+				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.PackOrder}, "description": "pack sizes, in cans: 12, 18, 24"},
 				"brands":       map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.Brands}},
 				"max_cost_usd": map[string]any{"type": "number", "description": "most to spend under the mission"},
 			}, "packs", "brands", "max_cost_usd")},

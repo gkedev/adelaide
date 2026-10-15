@@ -22,19 +22,20 @@ import (
 	"github.com/gkedev/adelaide/internal/ucp"
 )
 
-// Pack sizes a player can choose, in cans. No single cans: one can is not
-// worth buying and shipping.
-var Packs = map[string]int{"4": 4, "8": 8, "12": 12, "18": 18, "24": 24}
+// Pack sizes a player can choose, in cans: the multi-can packs the UCP
+// stores actually sell. No single cans (not worth buying and shipping), and
+// no 3-, 4- or 8-packs (neither store lists any).
+var Packs = map[string]int{"12": 12, "18": 18, "24": 24}
 
 // PackOrder lists the pack choices in display order.
-var PackOrder = []string{"4", "8", "12", "18", "24"}
+var PackOrder = []string{"12", "18", "24"}
 
 // Brands a player can choose.
 var Brands = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson"}
 
 // Criteria are the player's choices.
 type Criteria struct {
-	Packs        []string `json:"packs"`  // "4", "8", "12", "18", "24" (cans)
+	Packs        []string `json:"packs"`  // "12", "18", "24" (cans)
 	Brands       []string `json:"brands"` // Brands
 	MaxCostCents int64    `json:"max_cost_cents"`
 }
@@ -48,7 +49,7 @@ func (c Criteria) Normalize() (Criteria, error) {
 			p = strings.TrimSuffix(p, suf)
 		}
 		if _, ok := Packs[p]; !ok {
-			return out, fmt.Errorf("unknown pack %q: choose from 4, 8, 12, 18, 24-pack", p)
+			return out, fmt.Errorf("unknown pack %q: choose from 12, 18, 24-pack", p)
 		}
 		if !slices.Contains(out.Packs, p) {
 			out.Packs = append(out.Packs, p)
@@ -239,8 +240,8 @@ func (r *Registry) SetKeycardPolicy(id, policyID, name string) {
 	}
 }
 
-// PackOf is the pack choice a listing of cans falls under ("4", "8", "12",
-// "18", "24"), or "".
+// PackOf is the pack choice a listing of cans falls under ("12", "18",
+// "24"), or "".
 func PackOf(cans int) string {
 	for p, n := range Packs {
 		if n == cans {
