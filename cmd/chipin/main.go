@@ -187,10 +187,19 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	roles.Register(mux)
 	sh.Register(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /robots.txt", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
+	})
 	if o.public != "" {
 		mux.Handle("/", staticSite(o.public)) // no method in the pattern: it would conflict with aauth-go's routes
 	}
-	return &host{shop: sh, handler: mux}, nil
+	// Demo service: keep every page and endpoint out of search engines.
+	noindex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		mux.ServeHTTP(w, r)
+	})
+	return &host{shop: sh, handler: noindex}, nil
 }
 
 // staticSite serves dir, falling back to index.html like the nginx site did.

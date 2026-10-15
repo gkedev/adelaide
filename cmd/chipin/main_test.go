@@ -24,11 +24,15 @@ func TestHostRoutes(t *testing.T) {
 		"/.well-known/ucp/chip-in-agent.json": 200,
 		"/jwks":                               200,
 		"/healthz":                            200,
+		"/robots.txt":                         200,
 	} {
 		rec := httptest.NewRecorder()
 		h.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != want {
 			t.Errorf("GET %s: %d, want %d", path, rec.Code, want)
+		}
+		if rec.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
+			t.Errorf("GET %s: no X-Robots-Tag", path)
 		}
 	}
 }
