@@ -53,7 +53,7 @@ type options struct {
 	budget, dailyBudget, maxOrder    float64
 	balls                            int
 	query, packs, brands, buy        string
-	guardrail                        bool
+	guardrail, authorizeOnly         bool
 	enrollment, shopURL              string
 	out                              string
 	jsonOut                          bool
@@ -82,9 +82,10 @@ func main() {
 	fs.StringVar(&o.profile, "ucp-profile", env("UCP_AGENT_PROFILE", ""), "UCP agent profile URL sent to stores (default: {origin}"+shop.UCPProfilePath+")")
 	fs.StringVar(&o.fixture, "catalog-fixture", env("CHIPIN_CATALOG_FIXTURE", ""), "answer catalog searches from this recorded file")
 	fs.StringVar(&o.pay, "pay", env("CHIPIN_PAY", "spt"), "payment: spt (shared payment token), card (test card), none")
-	fs.Float64Var(&o.budget, "max-cost", 60, "agent: the player's max cost for the mission, USD")
-	fs.StringVar(&o.packs, "packs", "can,24", "agent: the player's pack sizes (can, 12, 18, 24)")
-	fs.StringVar(&o.brands, "brands", "Penn,Dunlop", "agent: the player's brands (Dunlop, Penn, Tecnifibre, Wilson)")
+	fs.Float64Var(&o.budget, "max-cost", 100, "agent: the player's max cost for the mission, USD")
+	fs.StringVar(&o.packs, "packs", "12,24", "agent: the player's pack sizes in cans (4, 8, 12, 18, 24)")
+	fs.BoolVar(&o.authorizeOnly, "authorize-only", false, "agent: with -buy, stop once the order is authorized (Keycard ALLOW, auth token), without paying")
+	fs.StringVar(&o.brands, "brands", "Penn,Wilson", "agent: the player's brands (Dunlop, Penn, Tecnifibre, Wilson)")
 	fs.Float64Var(&o.dailyBudget, "daily-budget", envFloat("CHIPIN_DAILY_BUDGET", 0), "serve: most one person may spend per day at ChipIn, USD (0: no daily limit)")
 	fs.Float64Var(&o.maxOrder, "max-order", envFloat("CHIPIN_MAX_ORDER", 150), "serve: per-order cap, USD")
 	fs.IntVar(&o.balls, "balls", 24, "agent: balls the crew needs")
@@ -307,7 +308,7 @@ func agentConfig(o options, shopURL, ps string, wallet *payments.Stripe, insecur
 	return agent.Config{
 		ShopURL: shopURL, APURL: shopURL, PSURL: ps, EnrollmentSecret: o.enrollment,
 		Query: o.query, TargetBalls: o.balls, BudgetCents: cents(o.budget), TryOverBudget: o.guardrail,
-		Packs: splitList(o.packs), Brands: splitList(o.brands), Buy: o.buy, Decide: askPlayer,
+		Packs: splitList(o.packs), Brands: splitList(o.brands), Buy: o.buy, Decide: askPlayer, AuthorizeOnly: o.authorizeOnly,
 		Wallet: wallet, Insecure: insecure, Log: log,
 	}
 }

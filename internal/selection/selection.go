@@ -22,15 +22,19 @@ import (
 	"github.com/gkedev/adelaide/internal/ucp"
 )
 
-// Pack sizes a player can choose, in 3-ball cans.
-var Packs = map[string]int{"can": 1, "12": 12, "18": 18, "24": 24}
+// Pack sizes a player can choose, in cans. No single cans: one can is not
+// worth buying and shipping.
+var Packs = map[string]int{"4": 4, "8": 8, "12": 12, "18": 18, "24": 24}
+
+// PackOrder lists the pack choices in display order.
+var PackOrder = []string{"4", "8", "12", "18", "24"}
 
 // Brands a player can choose.
 var Brands = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson"}
 
 // Criteria are the player's choices.
 type Criteria struct {
-	Packs        []string `json:"packs"`  // "can", "12", "18", "24"
+	Packs        []string `json:"packs"`  // "4", "8", "12", "18", "24" (cans)
 	Brands       []string `json:"brands"` // Brands
 	MaxCostCents int64    `json:"max_cost_cents"`
 }
@@ -39,12 +43,12 @@ type Criteria struct {
 func (c Criteria) Normalize() (Criteria, error) {
 	var out Criteria
 	for _, p := range c.Packs {
-		p = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(p), " pack"))
-		if p == "1" || p == "cans" {
-			p = "can"
+		p = strings.ToLower(strings.TrimSpace(p))
+		for _, suf := range []string{"-pack", " pack", "pack", "-can", " cans", "cans"} {
+			p = strings.TrimSuffix(p, suf)
 		}
 		if _, ok := Packs[p]; !ok {
-			return out, fmt.Errorf("unknown pack %q: choose from can, 12, 18, 24", p)
+			return out, fmt.Errorf("unknown pack %q: choose from 4, 8, 12, 18, 24-pack", p)
 		}
 		if !slices.Contains(out.Packs, p) {
 			out.Packs = append(out.Packs, p)
@@ -62,14 +66,14 @@ func (c Criteria) Normalize() (Criteria, error) {
 	if len(out.Packs) == 0 || len(out.Brands) == 0 || c.MaxCostCents <= 0 {
 		return out, errors.New("choose at least one pack size, one brand, and a max cost")
 	}
-	slices.Sort(out.Packs)
+	slices.SortFunc(out.Packs, func(a, b string) int { return Packs[a] - Packs[b] })
 	slices.Sort(out.Brands)
 	out.MaxCostCents = c.MaxCostCents
 	return out, nil
 }
 
 // excluded listings are not pressurized adult balls.
-var excluded = []string{"foam", "starter", "stage", "junior", "kids", "pressureless", "low compression", "qst", "pickleball", "padel", "hopper", "basket", "green dot", "orange", "red "}
+var excluded = []string{"foam", "starter", "stage", "junior", "kids", "pressureless", "low compression", "qst", "pickleball", "padel", "hopper", "basket", "green dot", "orange", "red ", "coach", "practice", "teaching", "training", "logo"}
 
 // Matches reports whether an offer fits the criteria.
 func (c Criteria) Matches(o ucp.Offer) bool {
@@ -97,11 +101,7 @@ func (c Criteria) Matches(o ucp.Offer) bool {
 func (c Criteria) Summary() string {
 	packs := make([]string, len(c.Packs))
 	for i, p := range c.Packs {
-		if p == "can" {
-			packs[i] = "single can"
-		} else {
-			packs[i] = p + "-can pack"
-		}
+		packs[i] = p + "-pack"
 	}
 	return fmt.Sprintf("%s · %s · up to %s", strings.Join(c.Brands, ", "), strings.Join(packs, ", "), spend.Dollars(c.MaxCostCents))
 }
@@ -239,7 +239,7 @@ func (r *Registry) SetKeycardPolicy(id, policyID, name string) {
 	}
 }
 
-// PackOf is the pack choice a listing of cans falls under ("can", "12",
+// PackOf is the pack choice a listing of cans falls under ("4", "8", "12",
 // "18", "24"), or "".
 func PackOf(cans int) string {
 	for p, n := range Packs {

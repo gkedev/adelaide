@@ -158,10 +158,11 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	}
 
 	te := fakeStore(t,
-		product("te1", "Championship Extra Duty Tennis Ball Can", 399), // Penn (product line), single can
-		product("te2", "Pro Penn Marathon Extra Duty Tennis Ball Case", 8995))
+		product("te1", "Penn Championship Extra Duty 12 Cans", 5495),
+		product("te2", "Championship Extra Duty Tennis Ball Case", 11995), // Penn (product line), 24 cans, over $60
+		product("te3", "Championship Extra Duty Tennis Ball Can", 399))    // a single can: never a choice
 	hb := fakeStore(t,
-		product("hb1", "Dunlop ATP Championship Regular Duty 24 Cans", 4999), // cheap per ball, but Dunlop
+		product("hb1", "Dunlop ATP Championship Extra Duty 12 Pack Tennis Ball Case", 4995), // 12 cans, cheap, but Dunlop
 		product("hb2", "Wilson Starter Foam Ball 6 Pack", 2395))
 	catalog := &ucp.Client{Profile: "https://demo.example/ucp-agent.json", Stores: []ucp.Store{
 		{Name: "Tennis Express", Domain: "te.example", Code: "te", Endpoint: te},
@@ -193,7 +194,7 @@ func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Resul
 	cfg := agent.Config{
 		ShopURL: d.shopURL, APURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
 		TargetBalls: 24, BudgetCents: 6000, TryOverBudget: true, Wallet: d.wallet,
-		Packs: []string{"can", "24"}, Brands: []string{"Penn"}, Buy: "best",
+		Packs: []string{"12", "24"}, Brands: []string{"Penn"}, Buy: "best",
 		HTTPClient: &http.Client{Timeout: 20 * time.Second}, Insecure: true, Log: d.log,
 	}
 	if mutate != nil {
@@ -212,25 +213,25 @@ func TestSelectionMission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The player chose Penn, single cans or 24-can cases, up to $60. The
-	// Dunlop case is cheaper per ball but outside the mission: refused.
+	// The player chose Penn, 12- or 24-packs, up to $60. The Dunlop 12-pack
+	// is cheaper per ball but outside the mission: refused.
 	if len(res.Denials) != 1 || !strings.Contains(res.Denials[0], "outside your mission") || !strings.Contains(res.Denials[0], "Dunlop") {
 		t.Fatalf("denials %q", res.Denials)
 	}
-	// 8 Penn cans × $3.99 = $31.92 (the Penn case, $89.95, is over the max cost).
+	// One Penn 12-pack, $54.95 (the Penn case, $119.95, is over the max cost).
 	o := res.Order
-	if o == nil || o.TotalCents != 3192 || o.PaidWith != "shared_payment_token" || o.PaymentStatus != "succeeded" || o.OrderHash == "" {
+	if o == nil || o.TotalCents != 5495 || o.PaidWith != "shared_payment_token" || o.PaymentStatus != "succeeded" || o.OrderHash == "" {
 		t.Fatalf("order %+v", o)
 	}
 	if len(d.stripe.payments) != 1 || d.stripe.payments[0]["idem"] != o.OrderHash || len(d.stripe.caps) != 1 {
 		t.Fatalf("stripe payments %v caps %v", d.stripe.payments, d.stripe.caps)
 	}
 	for _, want := range []string{
-		"selection proposed: Penn · 24-can pack, single can · up to $60.00 → 1 of",
+		"selection proposed: Penn · 12-pack, 24-pack · up to $60.00 → 1 of",
 		"G approves", // the mission, at the person server
 		"selection " + res.Mission[:10],
-		"DENY (local mission rules) Dunlop ATP Championship",
-		"ALLOW $31.92 for order " + o.OrderHash[:10],
+		"DENY (local mission rules) Dunlop ATP Championship Extra Duty 12 Pack",
+		"ALLOW $54.95 for order " + o.OrderHash[:10],
 	} {
 		if !strings.Contains(d.trace.String(), want) {
 			t.Errorf("trace lacks %q", want)
@@ -249,11 +250,40 @@ func TestShortlistOnly(t *testing.T) {
 	if res.Order != nil || len(d.stripe.payments) != 0 || len(d.stripe.caps) != 0 {
 		t.Fatalf("bought without the player's decision: %+v", res.Order)
 	}
-	if len(res.Shortlist) != 1 || res.Recommended != 0 || res.Shortlist[0].Quantity != 8 || res.Shortlist[0].TotalCents != 3192 {
+	if len(res.Shortlist) != 1 || res.Recommended != 0 || res.Shortlist[0].Quantity != 1 || res.Shortlist[0].TotalCents != 5495 {
 		t.Fatalf("shortlist %+v rec %d", res.Shortlist, res.Recommended)
 	}
 	if !strings.Contains(d.trace.String(), "nothing bought") {
 		t.Error("trace does not say nothing was bought")
+	}
+}
+
+// TestAuthorizeOnly: the order is approved (Keycard rules ALLOW, auth
+// token issued) and nothing is paid.
+func TestAuthorizeOnly(t *testing.T) {
+	d := deploy(t, 15000)
+	res, err := d.run(t, func(c *agent.Config) { c.AuthorizeOnly = true; c.TryOverBudget = false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Order != nil || len(d.stripe.payments) != 0 || len(d.stripe.caps) != 0 {
+		t.Fatalf("paid in an authorize-only run: %+v", res.Order)
+	}
+	if !strings.Contains(d.trace.String(), "ALLOW $54.95 for order") || !strings.Contains(d.trace.String(), "payment not made") {
+		t.Errorf("trace lacks the authorization:\n%s", d.trace.String())
+	}
+}
+
+// TestPackSizes: listings map to the pack choices, single cans to none.
+func TestPackSizes(t *testing.T) {
+	for title, want := range map[string]int{
+		"Penn Championship Extra Duty 12 Cans": 12, "ATP Championship Extra Duty 12 Pack Tennis Ball Case": 12,
+		"Slazenger Wimbledon 4 Tennis Ball 18 Can Case": 18, "Championship Extra Duty Tennis Ball Case": 24,
+		"Championship Extra Duty Tennis Ball Can": 1, "Wilson Starter Foam Ball 6 Pack": 0, "Penn CONTROL+ Bag of 12": 0,
+	} {
+		if got := ucp.CansInTitle(title); got != want {
+			t.Errorf("%q: %d cans, want %d", title, got, want)
+		}
 	}
 }
 

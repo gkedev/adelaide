@@ -718,10 +718,17 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 	}
 	var all []ucp.Offer
 	src := "live (UCP)"
+	// Each chosen brand, plus pack-size searches: stores' search ranking
+	// differs, and a query a store fails on must not sink the mission.
+	queries := []string{}
 	for _, b := range c.Brands {
-		res, err := s.cfg.Catalog.Search(ctx, b+" tennis balls")
+		queries = append(queries, b+" tennis balls")
+	}
+	queries = append(queries, "tennis balls 12 cans", "tennis ball case", "tennis balls 4 pack", "tennis balls 18 cans")
+	for _, q := range queries {
+		res, err := s.cfg.Catalog.Search(ctx, q)
 		if err != nil {
-			s.cfg.Log("ChipIn", fmt.Sprintf("search %q failed: %v", b, err))
+			s.cfg.Log("ChipIn", fmt.Sprintf("search %q failed: %v", q, err))
 			continue
 		}
 		if res.Recorded {
@@ -734,6 +741,15 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 		s.offers[o.ID] = o
 	}
 	s.mu.Unlock()
+	seen := map[string]bool{}
+	uniq := all[:0]
+	for _, o := range all {
+		if !seen[o.ID] {
+			seen[o.ID] = true
+			uniq = append(uniq, o)
+		}
+	}
+	all = uniq
 	m := selection.New(shopper, c, all)
 	if len(m.Products) == 0 {
 		return nil, fmt.Errorf("no products match %s (%d offers searched, %s)", c.Summary(), len(all), src)
@@ -902,7 +918,7 @@ func toolList() []map[string]any {
 			"inputSchema": obj(map[string]any{"query": str("what to look for, e.g. 'Penn Championship extra duty'")})},
 		{"name": "mission_propose", "description": "Propose a product-selection mission from the player's choices; returns the matching products across the UCP stores. Needs: person token.",
 			"inputSchema": obj(map[string]any{
-				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"can", "12", "18", "24"}}, "description": "pack sizes in cans"},
+				"packs":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.PackOrder}, "description": "pack sizes, in cans: 4, 8, 12, 18, 24"},
 				"brands":       map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": selection.Brands}},
 				"max_cost_usd": map[string]any{"type": "number", "description": "most to spend under the mission"},
 			}, "packs", "brands", "max_cost_usd")},

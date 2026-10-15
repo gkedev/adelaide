@@ -358,7 +358,7 @@ func newOffer(s Store, productID, variantID, title, u string, price money, avail
 
 // Brands the demo knows, and product lines whose titles omit the brand.
 var (
-	brands     = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson", "Babolat", "Head", "Yonex", "Diadem", "Gamma", "Tourna"}
+	brands     = []string{"Dunlop", "Penn", "Tecnifibre", "Wilson", "Slazenger", "Babolat", "Head", "Yonex", "Diadem", "Gamma", "Tourna"}
 	brandLines = map[string]string{"us open": "Wilson", "triniti": "Wilson", "championship": "Penn", "marathon": "Penn",
 		"tour extra": "Penn", "tour regular": "Penn", "grand prix": "Dunlop", "atp": "Dunlop", "x-one": "Tecnifibre", "court": "Tecnifibre"}
 )
@@ -387,13 +387,25 @@ func BrandOf(title string, tags []string) string {
 	return ""
 }
 
-var reNCans = regexp.MustCompile(`(?i)\b(\d+)[\s-]*cans?\b`)
+var (
+	reNCans     = regexp.MustCompile(`(?i)\b(\d+)[\s-]*cans?\b`)
+	reNPackCans = regexp.MustCompile(`(?i)\b(\d+)[\s-]*pack\b.*\b(case|cans?)\b|\b(case|cans?)\b.*\b(\d+)[\s-]*pack\b`)
+)
 
 // CansInTitle is the number of cans a listing holds: "24 Cans" 24, "4-Can
-// Pack" 4, "Case" 24, "Can" 1; zero when it is not sold in cans.
+// Pack" 4, "12 Pack Tennis Ball Case" 12, "Case" 24, "Can" 1; zero when it
+// is not sold in cans ("Bag of 12", "6 Pack" foam balls).
 func CansInTitle(title string) int {
 	if m := reNCans.FindStringSubmatch(title); m != nil {
 		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	if m := reNPackCans.FindStringSubmatch(title); m != nil {
+		d := m[1]
+		if d == "" {
+			d = m[4]
+		}
+		n, _ := strconv.Atoi(d)
 		return n
 	}
 	switch {

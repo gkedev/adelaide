@@ -44,6 +44,9 @@ type Config struct {
 	// when set and Buy is "", asks the player instead.
 	Buy    string
 	Decide func(shortlist []Choice, recommended int) string
+	// AuthorizeOnly stops a purchase after Keycard and the access server
+	// approve the order (auth token issued), before any payment.
+	AuthorizeOnly bool
 	// Packs, Brands and BudgetCents (the max cost) are the player's
 	// choices: they become the selection mission Keycard enforces.
 	Packs  []string
@@ -250,6 +253,9 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		if err := shopping.tool(ctx, "checkout_authorize", nil, nil); err != nil {
 			return nil, err
 		}
+		if cfg.AuthorizeOnly {
+			return nil, errAuthorizedOnly
+		}
 		args := map[string]any{}
 		if cfg.Wallet != nil {
 			spt, err := cfg.Wallet.GrantTestSPT(ctx, quote.TotalCents, 10*time.Minute)
@@ -274,7 +280,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": value.offer.ID, "quantity": value.qty}, nil); err != nil {
 			return nil, fmt.Errorf("cart_add: %w", err)
 		}
-		if _, err := pay("outside the mission on purpose"); err != nil {
+		if _, err := pay("outside the mission on purpose"); err != nil && !errors.Is(err, errAuthorizedOnly) {
 			res.Denials = append(res.Denials, err.Error())
 			log("refused, as it should be: " + shortErr(err))
 		} else {
@@ -303,6 +309,10 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, fmt.Errorf("cart_add: %w", err)
 	}
 	order, err := pay("within the mission")
+	if errors.Is(err, errAuthorizedOnly) {
+		log(fmt.Sprintf("authorized: auth token bound to this order; payment not made (authorize-only run)"))
+		return res, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("checkout: %w", err)
 	}
@@ -311,6 +321,8 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 
 	return res, nil
 }
+
+var errAuthorizedOnly = errors.New("authorized; payment skipped")
 
 // Choice is one shortlisted product with the quantity the agent proposes.
 type Choice struct {
@@ -378,7 +390,7 @@ func pickChoice(list []Choice, rec int, decision string) (*Choice, error) {
 // offMission is the most tempting pressurized product the catalog search
 // found that the mission does not allow (cheapest per ball), one unit.
 func offMission(offers []ucp.Offer, c selection.Criteria) *plan {
-	any := selection.Criteria{Brands: selection.Brands, Packs: []string{"can", "12", "18", "24"}, MaxCostCents: 1 << 40}
+	any := selection.Criteria{Brands: selection.Brands, Packs: selection.PackOrder, MaxCostCents: 1 << 40}
 	var best *plan
 	for _, o := range offers {
 		if !any.Matches(o) || c.Matches(o) || o.Balls <= 0 {
@@ -392,14 +404,13 @@ func offMission(offers []ucp.Offer, c selection.Criteria) *plan {
 }
 
 func packName(cans int) string {
-	switch p := selection.PackOf(cans); p {
-	case "":
-		return "not a can pack"
-	case "can":
-		return "single can"
-	default:
-		return p + "-can pack"
+	if p := selection.PackOf(cans); p != "" {
+		return p + "-pack"
 	}
+	if cans == 1 {
+		return "single can"
+	}
+	return "not a can pack"
 }
 
 func orDefault(s, d string) string {
