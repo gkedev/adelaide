@@ -23,8 +23,7 @@ import (
 )
 
 // Pack sizes a player can choose, in cans: the multi-can packs the UCP
-// stores actually sell. No single cans (not worth buying and shipping), and
-// no 3-, 4- or 8-packs (neither store lists any).
+// stores actually sell. No single cans: not worth buying and shipping.
 var Packs = map[string]int{"12": 12, "18": 18, "24": 24}
 
 // PackOrder lists the pack choices in display order.
