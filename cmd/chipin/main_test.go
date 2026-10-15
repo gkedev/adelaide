@@ -25,6 +25,7 @@ func TestHostRoutes(t *testing.T) {
 		"/jwks":                               200,
 		"/healthz":                            200,
 		"/robots.txt":                         200,
+		"/":                                   302,
 	} {
 		rec := httptest.NewRecorder()
 		h.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
