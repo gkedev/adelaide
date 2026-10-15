@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ChipIn, Let's find tennis balls that meet your demanding constraints!</title>
+<meta name="description" content="An AI agent finds tennis balls across real stores that meet your brand, pack and price constraints: AAuth four-party access with Hellō, Keycard, UCP and Stripe.">
+<style>
+  :root {
+    --bg:#0c1220; --panel:#131b2e; --panel2:#18223a; --line:#26314d; --fg:#eef2fa; --muted:#9aa6c0;
+    --ball:#d4f53c; --ok:#2fd27a; --okbg:rgba(47,210,122,.12); --deny:#ff6b6b; --denybg:rgba(255,107,107,.12); --opt:#7cc4ff;
+  }
+  * { box-sizing:border-box }
+  html { scroll-behavior:smooth }
+  body { margin:0; background:radial-gradient(1200px 600px at 80% -10%, #1b2a4d 0%, var(--bg) 60%); color:var(--fg);
+         font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif }
+  main { max-width:1040px; margin:0 auto; padding:44px 22px 70px }
+  .kicker { display:inline-flex; align-items:center; gap:8px; color:var(--ball); font-weight:700; letter-spacing:.04em; font-size:13px; text-transform:uppercase }
+  .ball { width:18px; height:18px; border-radius:50%; background:var(--ball); position:relative; box-shadow:0 0 0 2px rgba(212,245,60,.25) }
+  .ball:before, .ball:after { content:""; position:absolute; top:2px; bottom:2px; width:10px; border:2px solid #fff; border-color:transparent #fff transparent transparent; border-radius:50% }
+  .ball:before { left:-5px } .ball:after { right:-5px; transform:scaleX(-1) }
+  h1 { font-size:clamp(28px,4.6vw,46px); line-height:1.12; margin:10px 0 12px; letter-spacing:-.02em }
+  h1 em { font-style:normal; color:var(--ball) }
+  .lead { color:var(--muted); font-size:17px; max-width:760px; margin:0 0 22px }
+  .constraints { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 30px }
+  .c { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px }
+  .c small { display:block; color:var(--muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.06em }
+  .c b { font-size:16px }
+  .steps { list-style:none; margin:0; padding:0; position:relative }
+  .steps:before { content:""; position:absolute; left:21px; top:10px; bottom:10px; width:2px; background:linear-gradient(var(--ok),var(--ok) 88%,var(--opt)) ; opacity:.45 }
+  .step { position:relative; padding:0 0 22px 64px }
+  .check { position:absolute; left:0; top:2px; width:44px; height:44px; border-radius:50%; background:var(--okbg); border:2px solid var(--ok);
+           display:grid; place-items:center; color:var(--ok); font-size:22px; font-weight:800 }
+  .step.optional .check { border-style:dashed }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 18px }
+  .head { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 12px; margin-bottom:6px }
+  .n { color:var(--muted); font-size:13px; font-weight:600 }
+  h2 { font-size:19px; margin:0 }
+  .who { font-size:12.5px; color:var(--muted); background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:2px 10px }
+  .tag-opt { font-size:12px; font-weight:700; color:var(--opt); border:1px dashed var(--opt); border-radius:999px; padding:2px 10px }
+  p { margin:6px 0 0; color:#c9d2e6 }
+  .result { margin-top:10px; background:var(--okbg); border:1px solid rgba(47,210,122,.35); border-radius:10px; padding:9px 12px; font-size:14.5px }
+  .result b { color:var(--ok) }
+  .result.deny { background:var(--denybg); border-color:rgba(255,107,107,.4) }
+  .result.deny b { color:var(--deny) }
+  code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; background:#0e1528; border:1px solid var(--line); padding:1px 6px; border-radius:6px; color:#dfe6f5; word-break:break-all }
+  pre { margin:10px 0 0; background:#0e1528; border:1px solid var(--line); border-radius:10px; padding:12px; overflow-x:auto; font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:#cfe8a0 }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:14.5px }
+  th, td { text-align:left; padding:8px 8px; border-bottom:1px solid var(--line) }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; font-weight:600 }
+  td.num, th.num { text-align:right; white-space:nowrap }
+  tr.star td { background:rgba(212,245,60,.07) }
+  tr.star td:first-child { color:var(--ball); font-weight:800 }
+  .stack { display:flex; flex-wrap:wrap; gap:8px; margin-top:28px }
+  .stack span { font-size:13px; color:var(--muted); background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:5px 12px }
+  .stack b { color:var(--fg) }
+  footer { margin-top:24px; color:var(--muted); font-size:13.5px }
+  a { color:var(--ball) }
+  @media (max-width:640px) {
+    main { padding:28px 14px 50px }
+    .step { padding-left:52px } .steps:before { left:17px }
+    .check { width:36px; height:36px; font-size:18px }
+    .hide-sm { display:none }
+    th, td { padding:7px 5px; font-size:13.5px }
+  }
+</style>
+</head>
+<body>
+<main>
+  <span class="kicker"><span class="ball"></span> ChipIn · AAuth demo</span>
+  <h1>ChipIn, Let's find tennis balls that meet your <em>demanding constraints!</em></h1>
+  <p class="lead">Tell the agent what you'll accept. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
+
+  <div class="constraints" aria-label="The player's constraints">
+    <div class="c"><small>Brands</small><b>Penn · Wilson</b></div>
+    <div class="c"><small>Packs</small><b>Single can · 24-can case</b></div>
+    <div class="c"><small>Max cost</small><b>$60.00</b></div>
+    <div class="c"><small>For</small><b>24 balls, Monday doubles</b></div>
+  </div>
+
+  <ol class="steps">
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 1</span><h2>The agent gets its identity</h2><span class="who">Chip In agent provider</span></div>
+        <p>The shopping agent holds its own key. Chip In issues it an agent token that names the player's person server, Hellō.</p>
+        <div class="result"><b>✓</b> <code>aauth:chipin-shopper@chipin.aauth.tech</code> · ps = <code>person.hello.coop</code></div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 2</span><h2>Live catalog from real stores</h2><span class="who">UCP</span></div>
+        <p>With only its agent token, the agent searches Tennis Express and Holabird Sports over the Universal Commerce Protocol.</p>
+        <div class="result"><b>✓</b> 23 live offers from 2 stores</div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 3</span><h2>You sign in with Hellō</h2><span class="who">Person server</span></div>
+        <p>Hellō identifies you and links the agent to you. Chip In sees a directed identifier, different at every shop, never your email.</p>
+        <div class="result"><b>✓</b> Person token issued · your shortlist is yours alone</div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 4</span><h2>Your constraints become a mission</h2><span class="who">Chip In</span></div>
+        <p>Chip In searches each brand you chose across both stores and keeps only the products that fit your packs and max cost.</p>
+        <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · single can, 24-can case · up to $60.00</div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 5</span><h2>Mission approved, four-party</h2><span class="who">Hellō → Chip In access server</span></div>
+        <p>The agent asks Hellō for authority; Hellō federates the request to Chip In's own access server, which checks it is your proposal.</p>
+        <div class="result"><b>✓</b> Auth token for <code>mission:approve</code> · federated from <code>person.hello.coop</code></div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 6</span><h2>Keycard takes charge of your constraints</h2><span class="who">Keycard</span></div>
+        <p>Chip In publishes your mission as a Cedar policy in Keycard. From now on Keycard decides what can be bought for you.</p>
+<pre>permit (principal, action, resource) when {
+  context.scopes.contains("chipin:selection:…") &&
+  (context.scopes.contains("brand:penn") || context.scopes.contains("brand:wilson")) &&
+  (context.scopes.contains("pack:can") || context.scopes.contains("pack:24")) &&
+  context.scopes.contains("spend:within:usd:6000")
+};</pre>
+        <div class="result"><b>✓</b> Policy <code>chipin-mission-…</code> published in the Keycard zone</div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 7</span><h2>Your shortlist</h2><span class="who">Best price per ball first</span></div>
+        <p>Each product is sized to cover 24 balls within your max cost. ★ is the agent's pick.</p>
+        <table>
+          <thead><tr><th></th><th>Product</th><th class="hide-sm">Store</th><th class="num">Per ball</th><th class="num">Total</th></tr></thead>
+          <tbody>
+            <tr class="star"><td>★</td><td>8 × Penn Tour Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.58</td><td class="num">$38.00</td></tr>
+            <tr><td>2</td><td>8 × Intrigue All Court Pink can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.66</td><td class="num">$39.92</td></tr>
+            <tr><td>3</td><td>8 × Penn Championship Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.66</td><td class="num">$39.92</td></tr>
+            <tr><td>4</td><td>8 × Pro Penn Marathon+ XD can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.83</td><td class="num">$44.00</td></tr>
+            <tr><td>5</td><td>8 × Wilson US Open Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$2.20</td><td class="num">$52.72</td></tr>
+          </tbody>
+        </table>
+        <div class="result"><b>✓</b> 5 products across the stores meet every constraint</div>
+      </div></li>
+
+    <li class="step"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 8</span><h2>The guardrail holds</h2><span class="who">Keycard</span></div>
+        <p>To prove it, the agent tries a tempting product outside your mission: a Penn 24-can case for $89.95, cheaper per ball but over your max.</p>
+        <div class="result deny"><b>DENY</b> Keycard: Penn Championship Extra Duty 24 Cans (pack 24, mission total $89.95) is outside your mission · no payment token minted</div>
+      </div></li>
+
+    <li class="step optional"><span class="check" aria-hidden="true">✓</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 9</span><h2>Purchase with a token</h2><span class="tag-opt">Optional · your choice</span></div>
+        <p>Liked the results? An authenticated person can buy any shortlisted item. Chip In's resource token names the exact order's hash, the auth token comes back naming the same order, Keycard re-checks the line, and a Stripe shared payment token, capped at the total, pays for it once.</p>
+        <div class="result"><b>✓</b> 8 × Penn Tour Extra Duty, $38.00 · Keycard ALLOW · auth token bound to the order hash · Stripe SPT capped at $38.00 · payment succeeded (sandbox)</div>
+        <p style="font-size:13.5px;color:var(--muted)">Sandbox only: no real money moves and no order is placed at the stores. Run without <code>-buy</code> and the mission ends at the shortlist.</p>
+      </div></li>
+  </ol>
+
+  <div class="stack">
+    <span><b>AAuth</b> four-party · draft-11</span>
+    <span><b>Hellō</b> identifies you</span>
+    <span><b>Keycard</b> enforces your constraints</span>
+    <span><b>UCP</b> Tennis Express · Holabird</span>
+    <span><b>Stripe</b> shared payment token</span>
+  </div>
+
+  <footer>
+    See every message in the <a href="/sequence/">sequence diagram</a> · source <a href="https://github.com/gkedev/adelaide">github.com/gkedev/adelaide</a> · results from live runs on 15 Oct 2026.
+  </footer>
+</main>
+</body>
+</html>
