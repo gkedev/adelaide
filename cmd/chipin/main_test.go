@@ -33,7 +33,7 @@ func TestHostRoutes(t *testing.T) {
 	}
 }
 
-// TestSingleAudienceIsAString: tokens Chip In mints carry aud as a string
+// TestSingleAudienceIsAString: tokens ChipIn mints carry aud as a string
 // (Hellō rejects a one-element array); init sets this for the process.
 func TestSingleAudienceIsAString(t *testing.T) {
 	b, _ := json.Marshal(jwtv5.RegisteredClaims{Audience: jwtv5.ClaimStrings{"https://as.example"}})

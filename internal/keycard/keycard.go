@@ -1,7 +1,7 @@
 // Package keycard makes Keycard (https://keycard.ai) the enforcer of each
-// player's shopping mission. When a player approves a selection, Chip In
+// player's shopping mission. When a player approves a selection, ChipIn
 // publishes the player's choices (brands, pack sizes, max cost) as a Cedar
-// policy in the Keycard zone; before any purchase is authorized, Chip In's
+// policy in the Keycard zone; before any purchase is authorized, ChipIn's
 // access server asks Keycard to evaluate that policy for every order line.
 //
 // Cedar compares strings in context.scopes, so each line is described as
@@ -41,7 +41,7 @@ type Client struct {
 	// BaseURL defaults to https://api.keycard.ai.
 	BaseURL    string
 	HTTPClient *http.Client
-	// Origin is Chip In's origin; it identifies Chip In's Keycard entities.
+	// Origin is ChipIn's origin; it identifies ChipIn's Keycard entities.
 	Origin string
 
 	mu         sync.Mutex
@@ -81,7 +81,7 @@ func Cedar(m Mission) string {
 		return "(" + strings.Join(parts, " || ") + ")"
 	}
 	max := (m.MaxCostCents / SpendStepCents) * SpendStepCents
-	return fmt.Sprintf(`// Chip In shopping mission %s
+	return fmt.Sprintf(`// ChipIn shopping mission %s
 // %s
 @id("chipin-mission")
 permit (principal, action, resource)
@@ -119,7 +119,7 @@ func (c *Client) Publish(ctx context.Context, m Mission) (*Policy, error) {
 	var pol struct {
 		ID string `json:"id"`
 	}
-	if err := c.do(ctx, http.MethodPost, "policies", map[string]any{"name": name, "description": "Chip In mission: " + m.Summary}, &pol); err != nil {
+	if err := c.do(ctx, http.MethodPost, "policies", map[string]any{"name": name, "description": "ChipIn mission: " + m.Summary}, &pol); err != nil {
 		return nil, fmt.Errorf("keycard: create policy: %w", err)
 	}
 	var ver struct {
@@ -158,7 +158,7 @@ func (c *Client) Evaluate(ctx context.Context, p *Policy, scopes []string) (*Dec
 	return &Decision{Allow: out.Decision == "allow", Determining: out.Determining}, nil
 }
 
-// entities finds or creates Chip In's application and resource in the zone
+// entities finds or creates ChipIn's application and resource in the zone
 // (the principal and resource evaluations are made for).
 func (c *Client) entities(ctx context.Context) (string, string, error) {
 	c.mu.Lock()
@@ -176,8 +176,8 @@ func (c *Client) entities(ctx context.Context) (string, string, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		if err := c.do(ctx, http.MethodPost, "applications", map[string]any{"name": "Chip In shopping agent", "identifier": appIdent,
-			"description": "AAuth shopping agent; Chip In missions are evaluated for it"}, &a); err != nil {
+		if err := c.do(ctx, http.MethodPost, "applications", map[string]any{"name": "ChipIn shopping agent", "identifier": appIdent,
+			"description": "AAuth shopping agent; ChipIn missions are evaluated for it"}, &a); err != nil {
 			return "", "", fmt.Errorf("keycard: create application: %w", err)
 		}
 		app = a.ID
@@ -190,8 +190,8 @@ func (c *Client) entities(ctx context.Context) (string, string, error) {
 		var r struct {
 			ID string `json:"id"`
 		}
-		if err := c.do(ctx, http.MethodPost, "resources", map[string]any{"name": "Chip In", "identifier": resIdent, "application_id": app,
-			"description": "Chip In shop (AAuth resource, MCP)"}, &r); err != nil {
+		if err := c.do(ctx, http.MethodPost, "resources", map[string]any{"name": "ChipIn", "identifier": resIdent, "application_id": app,
+			"description": "ChipIn shop (AAuth resource, MCP)"}, &r); err != nil {
 			return "", "", fmt.Errorf("keycard: create resource: %w", err)
 		}
 		res = r.ID

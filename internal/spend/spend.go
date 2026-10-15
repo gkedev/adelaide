@@ -1,4 +1,4 @@
-// Package spend holds the two money rules every party in the Chip In demo
+// Package spend holds the two money rules every party in the ChipIn demo
 // agrees on: how a checkout amount travels in an AAuth scope, and how a
 // mission states its budget.
 //

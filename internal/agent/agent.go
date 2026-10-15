@@ -1,6 +1,6 @@
-// Package agent is the shopping agent: it enrolls at Chip In's agent
+// Package agent is the shopping agent: it enrolls at ChipIn's agent
 // provider for an agent identity that names the person's server (Hellō),
-// talks to Chip In's MCP server through aauth-go's Transport (which signs
+// talks to ChipIn's MCP server through aauth-go's Transport (which signs
 // every request and answers each AAuth challenge), has the person approve
 // each specific order at their person server, and pays with a Stripe shared
 // payment token capped at the approved amount.
@@ -31,8 +31,8 @@ import (
 
 // Config configures a shopping run.
 type Config struct {
-	ShopURL          string // Chip In (MCP at ShopURL + "/mcp")
-	APURL            string // agent provider (Chip In's origin)
+	ShopURL          string // ChipIn (MCP at ShopURL + "/mcp")
+	APURL            string // agent provider (ChipIn's origin)
 	PSURL            string // the person's server (https://person.hello.coop)
 	EnrollmentSecret string
 	// OnInteraction shows the person where to sign in or approve (URL and

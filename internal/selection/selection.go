@@ -1,5 +1,5 @@
 // Package selection is the product-selection mission: the player chooses
-// pack sizes, brands, and a maximum cost; Chip In finds the matching
+// pack sizes, brands, and a maximum cost; ChipIn finds the matching
 // products across the UCP stores; the player approves that list at their
 // person server; afterwards only those products, under that cost, can be
 // bought for them.

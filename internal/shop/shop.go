@@ -1,4 +1,4 @@
-// Package shop is Chip In, the demo merchant: an MCP server (Streamable
+// Package shop is ChipIn, the demo merchant: an MCP server (Streamable
 // HTTP, JSON responses) protected with AAuth draft -11 as a resource.
 //
 // Each tool asks for only as much trust as it needs (§6):
@@ -13,8 +13,8 @@
 // checkout_authorize lets an agent obtain the authorization before it
 // mints a payment credential, so a refused checkout never creates one.
 //
-// The catalog is live: Chip In sources offers from real retailers over UCP
-// (see package ucp). Chip In itself is the demo merchant of record; it
+// The catalog is live: ChipIn sources offers from real retailers over UCP
+// (see package ucp). ChipIn itself is the demo merchant of record; it
 // charges in the Stripe sandbox and does not place orders at the stores.
 package shop
 
@@ -60,7 +60,7 @@ type Config struct {
 	// URL is the shop's server identifier (the resource, iss of its
 	// resource tokens).
 	URL string
-	// AccessServer is Keycard's URL: the aud of Chip In's resource tokens.
+	// AccessServer is Keycard's URL: the aud of ChipIn's resource tokens.
 	AccessServer string
 	// TrustedIssuers are the person and access servers whose tokens the
 	// shop accepts (§9.4.3.2: a valid signature alone is not trust).
@@ -84,7 +84,7 @@ type Config struct {
 	Log func(role, msg string)
 }
 
-// Shop is the Chip In resource.
+// Shop is the ChipIn resource.
 type Shop struct {
 	cfg      Config
 	key      crypto.Signer
@@ -232,8 +232,8 @@ func (s *Shop) serveMission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"mission": m, "summary": m.Criteria.Summary()})
 }
 
-// Authorize is Chip In's check, for its access server, that a scope the
-// person (ps, sub) approved matches what Chip In offered them: a selection
+// Authorize is ChipIn's check, for its access server, that a scope the
+// person (ps, sub) approved matches what ChipIn offered them: a selection
 // mission they proposed, or an order that falls entirely within their
 // approved selection and its max cost.
 func (s *Shop) Authorize(scope, ps, sub string) error {
@@ -253,7 +253,7 @@ func (s *Shop) Authorize(scope, ps, sub string) error {
 	o := s.pending[spend.OrderFromScope(scope)]
 	s.mu.Unlock()
 	if o == nil || o.Shopper != shopper || o.TotalCents != amount {
-		return errors.New("Chip In made no such offer to this person")
+		return errors.New("ChipIn made no such offer to this person")
 	}
 	m, ok := s.cfg.Selections.Get(o.Selection)
 	if !ok || m.Status != "approved" || m.Shopper != shopper || selection.FromScope(scope) != m.ID {
@@ -288,7 +288,7 @@ func (s *Shop) enforceMission(m *selection.Mission, o *Offer, totalCents int64) 
 		}
 		c := m.Criteria
 		if !slices.Contains(c.Brands, l.Brand) || !slices.Contains(c.Packs, pack) || totalCents > c.MaxCostCents {
-			s.cfg.Log("Chip In", "DENY (local mission rules) "+desc)
+			s.cfg.Log("ChipIn", "DENY (local mission rules) "+desc)
 			return fmt.Errorf("outside your mission: %s (%s)", desc, c.Summary())
 		}
 	}
@@ -321,7 +321,7 @@ func (s *Shop) serveMetadata(w http.ResponseWriter, _ *http.Request) {
 		AccessMode:         aauth.AccessModeAuthToken,
 		RevocationEndpoint: s.cfg.URL + "/revoke",
 		ScopeDescriptions: map[string]string{
-			spend.ScopeCheckout: "Pay Chip In for one specific order: the amount and order named in the request. See " + s.cfg.URL + "/orders/{order} for its items.",
+			spend.ScopeCheckout: "Pay ChipIn for one specific order: the amount and order named in the request. See " + s.cfg.URL + "/orders/{order} for its items.",
 		},
 	})
 }
@@ -345,7 +345,7 @@ func (s *Shop) serveRevoke(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.revoked[[2]string{caller.ID, rr.JTI}] = true
 	s.mu.Unlock()
-	s.cfg.Log("Chip In", fmt.Sprintf("token %s… revoked by %s", truncate(rr.JTI, 8), caller.ID))
+	s.cfg.Log("ChipIn", fmt.Sprintf("token %s… revoked by %s", truncate(rr.JTI, 8), caller.ID))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -420,7 +420,7 @@ func (s *Shop) serveMCP(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{
 			"protocolVersion": "2025-06-18",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "chip-in", "title": "Chip In", "version": "2.0.0"},
+			"serverInfo":      map[string]any{"name": "chip-in", "title": "ChipIn", "version": "2.0.0"},
 			"instructions":    "Live tennis ball offers from Tennis Express and Holabird Sports. Payments need an AAuth mission with a budget.",
 		}
 	case "ping":
@@ -460,7 +460,7 @@ func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, t
 			return nil, false
 		}
 		if need > tierAgent {
-			s.cfg.Log("Chip In", fmt.Sprintf("%s needs the person behind %s → requirement=person-token", tool, ac.Subject))
+			s.cfg.Log("ChipIn", fmt.Sprintf("%s needs the person behind %s → requirement=person-token", tool, ac.Subject))
 			aauth.ChallengePersonToken(w)
 			return nil, false
 		}
@@ -469,7 +469,7 @@ func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, t
 	case aauth.TypPerson:
 		pc, err := aauth.VerifyAndExtractPerson(ctx, r, s.cfg.URL, verify)
 		if err == nil && !s.trusted[pc.Issuer] {
-			err = fmt.Errorf("%w: %s is not a person server Chip In trusts", aauth.ErrInvalidToken, pc.Issuer)
+			err = fmt.Errorf("%w: %s is not a person server ChipIn trusts", aauth.ErrInvalidToken, pc.Issuer)
 		}
 		if err == nil && s.isRevoked(pc.Issuer, pc.ID) {
 			err = aauth.ErrRevoked
@@ -490,7 +490,7 @@ func (s *Shop) authenticate(w http.ResponseWriter, r *http.Request, need tier, t
 			TokenVerifyOptions: verify,
 			CheckSubject: func(_ context.Context, iss, _ string) error {
 				if !s.trusted[iss] {
-					return fmt.Errorf("%w: %s is not an issuer Chip In trusts", aauth.ErrInvalidToken, iss)
+					return fmt.Errorf("%w: %s is not an issuer ChipIn trusts", aauth.ErrInvalidToken, iss)
 				}
 				return nil
 			},
@@ -547,7 +547,7 @@ func missionArg(args json.RawMessage) string {
 	return a.MissionID
 }
 
-// challenge issues a resource token for scope, addressed to Chip In's
+// challenge issues a resource token for scope, addressed to ChipIn's
 // access server, and answers requirement=auth-token.
 func (s *Shop) challenge(w http.ResponseWriter, scope string, presented aauth.PresentedToken, msg string) {
 	rt, err := aauth.IssueResourceToken(aauth.ResourceTokenParams{
@@ -557,13 +557,13 @@ func (s *Shop) challenge(w http.ResponseWriter, scope string, presented aauth.Pr
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.cfg.Log("Chip In", msg)
+	s.cfg.Log("ChipIn", msg)
 	aauth.ChallengeAuthToken(w, rt)
 }
 
 // challengeCheckout answers requirement=auth-token with a resource token
 // for exactly the order the shopper's cart holds (its amount and hash),
-// addressed to Chip In's access server (four-party).
+// addressed to ChipIn's access server (four-party).
 func (s *Shop) challengeCheckout(w http.ResponseWriter, shopper string, presented aauth.PresentedToken) {
 	o := s.currentOffer(shopper)
 	if o == nil {
@@ -658,7 +658,7 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 			return nil, err
 		}
 		m, _ := s.cfg.Selections.Get(args.MissionID)
-		s.cfg.Log("Chip In", fmt.Sprintf("selection %s approved by the person at %s: %s", short(m.ID), c.Auth.PS, m.Criteria.Summary()))
+		s.cfg.Log("ChipIn", fmt.Sprintf("selection %s approved by the person at %s: %s", short(m.ID), c.Auth.PS, m.Criteria.Summary()))
 		if s.cfg.Keycard != nil {
 			pol, err := s.cfg.Keycard.Publish(ctx, keycard.Mission{ID: m.ID, Summary: m.Criteria.Summary(),
 				Brands: m.Criteria.Brands, Packs: m.Criteria.Packs, MaxCostCents: m.Criteria.MaxCostCents})
@@ -669,7 +669,7 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 			m, _ = s.cfg.Selections.Get(args.MissionID)
 			s.cfg.Log("Keycard", fmt.Sprintf("published Cedar policy %s for the mission: %s", pol.Name, m.Criteria.Summary()))
 		}
-		return map[string]any{"mission": m, "summary": m.Criteria.Summary(), "enforced_by": orDefault(m.KeycardPolicyName, "Chip In (local rules)")}, nil
+		return map[string]any{"mission": m, "summary": m.Criteria.Summary(), "enforced_by": orDefault(m.KeycardPolicyName, "ChipIn (local rules)")}, nil
 	case "cart_add":
 		return s.cartAdd(c.Shopper, args.OfferID, args.Quantity)
 	case "cart_view", "checkout_quote":
@@ -679,7 +679,7 @@ func (s *Shop) callTool(ctx context.Context, c *caller, name string, raw json.Ra
 	case "checkout_authorize":
 		amount, _ := spend.AmountFromScope(c.Auth.Scope)
 		hash := spend.OrderFromScope(c.Auth.Scope)
-		s.cfg.Log("Chip In", fmt.Sprintf("order %s approved: %s, auth token from %s (person at %s)", short(hash), spend.Dollars(amount), c.Auth.Issuer, c.Auth.PS))
+		s.cfg.Log("ChipIn", fmt.Sprintf("order %s approved: %s, auth token from %s (person at %s)", short(hash), spend.Dollars(amount), c.Auth.Issuer, c.Auth.PS))
 		return map[string]any{"authorized_cents": amount, "authorized": spend.Dollars(amount), "order_hash": hash,
 			"order_url": s.cfg.URL + "/orders/" + hash, "authorized_by": c.Auth.Issuer, "mission_s256": c.Auth.MissionS256}, nil
 	case "checkout_pay":
@@ -705,7 +705,7 @@ func (s *Shop) search(ctx context.Context, query string) (any, error) {
 	if res.Recorded {
 		src = "recorded fixture"
 	}
-	s.cfg.Log("Chip In", fmt.Sprintf("catalog_search %q: %d offers from %d stores, %s", query, len(res.Offers), len(s.cfg.Catalog.Stores), src))
+	s.cfg.Log("ChipIn", fmt.Sprintf("catalog_search %q: %d offers from %d stores, %s", query, len(res.Offers), len(s.cfg.Catalog.Stores), src))
 	return map[string]any{"source": src, "offers": res.Offers, "store_errors": res.Errors}, nil
 }
 
@@ -721,7 +721,7 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 	for _, b := range c.Brands {
 		res, err := s.cfg.Catalog.Search(ctx, b+" tennis balls")
 		if err != nil {
-			s.cfg.Log("Chip In", fmt.Sprintf("search %q failed: %v", b, err))
+			s.cfg.Log("ChipIn", fmt.Sprintf("search %q failed: %v", b, err))
 			continue
 		}
 		if res.Recorded {
@@ -739,7 +739,7 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 		return nil, fmt.Errorf("no products match %s (%d offers searched, %s)", c.Summary(), len(all), src)
 	}
 	s.cfg.Selections.Put(m)
-	s.cfg.Log("Chip In", fmt.Sprintf("selection proposed: %s → %d of %d offers across the UCP stores (%s)", c.Summary(), len(m.Products), len(all), src))
+	s.cfg.Log("ChipIn", fmt.Sprintf("selection proposed: %s → %d of %d offers across the UCP stores (%s)", c.Summary(), len(m.Products), len(all), src))
 	return map[string]any{"mission": m, "summary": c.Summary(), "approval_scope": selection.Scope(m),
 		"mission_url": s.cfg.URL + "/missions/" + m.ID, "source": src}, nil
 }
@@ -838,7 +838,7 @@ func (s *Shop) pay(ctx context.Context, c *caller, spt string) (any, error) {
 	o := Order{
 		ID: orderID, Shopper: c.Shopper, Items: items, TotalCents: amount, OrderHash: hash,
 		Mission: c.Auth.MissionS256, AuthorizedBy: c.Auth.Issuer,
-		Fulfillment: "simulated: Chip In is a demo merchant and places no order at " + storesOf(items),
+		Fulfillment: "simulated: ChipIn is a demo merchant and places no order at " + storesOf(items),
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	if s.cfg.Stripe == nil {
@@ -847,7 +847,7 @@ func (s *Shop) pay(ctx context.Context, c *caller, spt string) (any, error) {
 		mission := c.Auth.MissionS256
 		pi, err := s.cfg.Stripe.Pay(ctx, payments.Charge{
 			AmountCents:    amount,
-			Description:    fmt.Sprintf("Chip In order %s (AAuth demo)", orderID),
+			Description:    fmt.Sprintf("ChipIn order %s (AAuth demo)", orderID),
 			SPT:            spt,
 			IdempotencyKey: hash,
 			Metadata: map[string]string{
@@ -872,7 +872,7 @@ func (s *Shop) pay(ctx context.Context, c *caller, spt string) (any, error) {
 	s.orders = append(s.orders, o)
 	delete(s.carts, c.Shopper)
 	s.mu.Unlock()
-	s.cfg.Log("Chip In", fmt.Sprintf("order %s paid %s via %s: %s", orderID, spend.Dollars(amount), orDefault(o.PaidWith, "nothing"), o.PaymentStatus))
+	s.cfg.Log("ChipIn", fmt.Sprintf("order %s paid %s via %s: %s", orderID, spend.Dollars(amount), orDefault(o.PaidWith, "nothing"), o.PaymentStatus))
 	return o, nil
 }
 

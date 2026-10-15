@@ -1,10 +1,10 @@
-// Package trust hosts the AAuth roles Chip In runs itself, on Chip In's own
+// Package trust hosts the AAuth roles ChipIn runs itself, on ChipIn's own
 // origin, built on aauth-go v0.2 (draft-hardt-oauth-aauth-protocol-11):
 //
 //   - the agent provider that issues the shopping agent its agent token,
 //     naming the person's server (Hellō, https://person.hello.coop) as ps;
-//   - the Chip In access server (four-party, §9.1): the person server
-//     federates each purchase here, and Chip In's policy decides it.
+//   - the ChipIn access server (four-party, §9.1): the person server
+//     federates each purchase here, and ChipIn's policy decides it.
 //
 // The person server is not here: players sign in and approve at Hellō.
 package trust
@@ -31,7 +31,7 @@ const EnrollHeader = "X-Chipin-Enrollment"
 
 // Config configures the roles.
 type Config struct {
-	// Issuer is Chip In's origin, shared by the agent provider, the access
+	// Issuer is ChipIn's origin, shared by the agent provider, the access
 	// server, and the shop (each with its own key and metadata document).
 	Issuer string
 	// ShopURL is the resource the access server governs (normally Issuer).
@@ -42,7 +42,7 @@ type Config struct {
 	AgentDomain string
 	// APKey and ASKey are the signing keys (generated when nil).
 	APKey, ASKey crypto.Signer
-	// DailyBudgetCents is the most one person may spend at Chip In per day.
+	// DailyBudgetCents is the most one person may spend at ChipIn per day.
 	DailyBudgetCents int64
 	// MaxOrderCents is the per-order cap.
 	MaxOrderCents int64
@@ -110,7 +110,7 @@ func New(cfg Config) (*Roles, error) {
 		Key:        cfg.APKey,
 		Registrar:  enrollment{r},
 		OnIssue: func(_ context.Context, it agentprovider.IssuedToken) {
-			cfg.Log("Chip In AP", "issued agent token to "+it.Claims.Subject+" (ps "+cfg.PS+")")
+			cfg.Log("ChipIn AP", "issued agent token to "+it.Claims.Subject+" (ps "+cfg.PS+")")
 		},
 	})
 	if err != nil {
@@ -141,8 +141,8 @@ func (r *Roles) Register(mux *http.ServeMux) {
 	r.AS.Register(mux)
 }
 
-// policy is Chip In's purchase policy. The person server has already had
-// the person (or their supervisor) approve the order; Chip In checks that
+// policy is ChipIn's purchase policy. The person server has already had
+// the person (or their supervisor) approve the order; ChipIn checks that
 // the request names one specific order, under the per-order cap and the
 // person's daily budget.
 func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest) (accessserver.Decision, error) {
@@ -151,7 +151,7 @@ func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest
 	if !ok {
 		if r.cfg.Authorize != nil {
 			if err := r.cfg.Authorize(rc.Scope, rc.PS, rc.Subject); err != nil {
-				r.cfg.Log("Chip In AS", "DENY: "+err.Error())
+				r.cfg.Log("ChipIn AS", "DENY: "+err.Error())
 				return accessserver.Deny(err.Error()), nil
 			}
 		}
@@ -159,19 +159,19 @@ func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest
 	}
 	order := spend.OrderFromScope(rc.Scope)
 	if order == "" {
-		r.cfg.Log("Chip In AS", "DENY: payment scope names no order")
+		r.cfg.Log("ChipIn AS", "DENY: payment scope names no order")
 		return accessserver.Deny("a payment must name one specific order"), nil
 	}
 	if r.cfg.MaxOrderCents > 0 && amount > r.cfg.MaxOrderCents {
-		r.cfg.Log("Chip In AS", fmt.Sprintf("DENY %s: above the per-order cap %s", spend.Dollars(amount), spend.Dollars(r.cfg.MaxOrderCents)))
-		return accessserver.Deny(fmt.Sprintf("orders above %s need a human at Chip In", spend.Dollars(r.cfg.MaxOrderCents))), nil
+		r.cfg.Log("ChipIn AS", fmt.Sprintf("DENY %s: above the per-order cap %s", spend.Dollars(amount), spend.Dollars(r.cfg.MaxOrderCents)))
+		return accessserver.Deny(fmt.Sprintf("orders above %s need a human at ChipIn", spend.Dollars(r.cfg.MaxOrderCents))), nil
 	}
 	who := rc.PS + "|" + rc.Subject
 	today := time.Now().UTC().Format("2006-01-02")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.seen[order] {
-		r.cfg.Log("Chip In AS", "DENY: order "+short(order)+" was already authorized")
+		r.cfg.Log("ChipIn AS", "DENY: order "+short(order)+" was already authorized")
 		return accessserver.Deny("this order was already authorized"), nil
 	}
 	sp := r.spent[who]
@@ -179,19 +179,19 @@ func (r *Roles) policy(_ context.Context, req *accessserver.AuthorizationRequest
 		sp = spending{day: today}
 	}
 	if b := r.cfg.DailyBudgetCents; b > 0 && sp.cents+amount > b {
-		r.cfg.Log("Chip In AS", fmt.Sprintf("DENY %s for order %s: over the daily budget (%s of %s used)", spend.Dollars(amount), short(order), spend.Dollars(sp.cents), spend.Dollars(b)))
-		return accessserver.Deny(fmt.Sprintf("%s exceeds your Chip In daily budget: %s of %s left", spend.Dollars(amount), spend.Dollars(b-sp.cents), spend.Dollars(b))), nil
+		r.cfg.Log("ChipIn AS", fmt.Sprintf("DENY %s for order %s: over the daily budget (%s of %s used)", spend.Dollars(amount), short(order), spend.Dollars(sp.cents), spend.Dollars(b)))
+		return accessserver.Deny(fmt.Sprintf("%s exceeds your ChipIn daily budget: %s of %s left", spend.Dollars(amount), spend.Dollars(b-sp.cents), spend.Dollars(b))), nil
 	}
 	if r.cfg.Authorize != nil {
 		if err := r.cfg.Authorize(rc.Scope, rc.PS, rc.Subject); err != nil {
-			r.cfg.Log("Chip In AS", fmt.Sprintf("DENY %s for order %s: %v", spend.Dollars(amount), short(order), err))
+			r.cfg.Log("ChipIn AS", fmt.Sprintf("DENY %s for order %s: %v", spend.Dollars(amount), short(order), err))
 			return accessserver.Deny(err.Error()), nil
 		}
 	}
 	sp.cents += amount
 	r.spent[who] = sp
 	r.seen[order] = true
-	r.cfg.Log("Chip In AS", fmt.Sprintf("ALLOW %s for order %s, approved at %s", spend.Dollars(amount), short(order), rc.PS))
+	r.cfg.Log("ChipIn AS", fmt.Sprintf("ALLOW %s for order %s, approved at %s", spend.Dollars(amount), short(order), rc.PS))
 	return accessserver.Allow(""), nil
 }
 

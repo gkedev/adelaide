@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ChipIn, Let's find tennis balls that meet your demanding constraints!</title>
+<title>ChipIn, Let's find tennis balls that meet your tennis crew's demanding constraints!</title>
 <meta name="description" content="An AI agent finds tennis balls across real stores that meet your brand, pack and price constraints: AAuth four-party access with Hellō, Keycard, UCP and Stripe.">
 <style>
   :root {
@@ -85,14 +85,13 @@
     </div>
   </div>
   <h1>ChipIn</h1>
-  <p class="tagline">Let's find tennis balls that meet your demanding constraints!</p>
-  <p class="lead">Tell the agent what you'll accept. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
+  <p class="tagline">Let's find tennis balls that meet your tennis crew's demanding constraints!</p>
+  <p class="lead">Tell the recommendation agent what tennis balls you prefer. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
 
   <div class="constraints" aria-label="The player's constraints">
     <div class="c"><small>Brands</small><b>Penn · Wilson</b></div>
     <div class="c"><small>Packs</small><b>Single can · 24-can case</b></div>
     <div class="c"><small>Max cost</small><b>$60.00</b></div>
-    <div class="c"><small>For</small><b>24 balls, Monday doubles</b></div>
   </div>
   <p class="mode-note only-approved">Showing: Keycard <b style="color:var(--ok)">approves</b> a shortlisted product that meets every constraint.</p>
   <p class="mode-note only-denied">Showing: Keycard <b style="color:var(--deny)">denies</b> a tempting product outside the mission.</p>
@@ -100,8 +99,8 @@
   <ol class="steps">
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
-        <div class="head"><span class="n">Step 1</span><h2>The agent gets its identity</h2><span class="who">Chip In agent provider</span></div>
-        <p>The shopping agent holds its own key. Chip In issues it an agent token that names the player's person server, Hellō.</p>
+        <div class="head"><span class="n">Step 1</span><h2>The agent gets its identity</h2><span class="who">ChipIn agent provider</span></div>
+        <p>The shopping agent holds its own key. ChipIn issues it an agent token that names the player's person server, Hellō.</p>
         <div class="result"><b>✓</b> <code>aauth:chipin-shopper@chipin.aauth.tech</code> · ps = <code>person.hello.coop</code></div>
       </div></li>
 
@@ -115,28 +114,28 @@
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 3</span><h2>You sign in with Hellō</h2><span class="who">Person server</span></div>
-        <p>Hellō identifies you and links the agent to you. Chip In sees a directed identifier, different at every shop, never your email.</p>
+        <p>Hellō identifies you and links the agent to you. ChipIn sees a directed identifier, different at every shop, never your email.</p>
         <div class="result"><b>✓</b> Person token issued · your shortlist is yours alone</div>
       </div></li>
 
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
-        <div class="head"><span class="n">Step 4</span><h2>Your constraints become a mission</h2><span class="who">Chip In</span></div>
-        <p>Chip In searches each brand you chose across both stores and keeps only the products that fit your packs and max cost.</p>
+        <div class="head"><span class="n">Step 4</span><h2>Your constraints become a mission</h2><span class="who">ChipIn</span></div>
+        <p>ChipIn searches each brand you chose across both stores and keeps only the products that fit your packs and max cost.</p>
         <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · single can, 24-can case · up to $60.00</div>
       </div></li>
 
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
-        <div class="head"><span class="n">Step 5</span><h2>Mission approved, four-party</h2><span class="who">Hellō → Chip In access server</span></div>
-        <p>The agent asks Hellō for authority; Hellō federates the request to Chip In's own access server, which checks it is your proposal.</p>
+        <div class="head"><span class="n">Step 5</span><h2>Mission approved, four-party</h2><span class="who">Hellō → ChipIn access server</span></div>
+        <p>The agent asks Hellō for authority; Hellō federates the request to ChipIn's own access server, which checks it is your proposal.</p>
         <div class="result"><b>✓</b> Auth token for <code>mission:approve</code> · federated from <code>person.hello.coop</code></div>
       </div></li>
 
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 6</span><h2>Keycard takes charge of your constraints</h2><span class="who">Keycard</span></div>
-        <p>Chip In publishes your mission as a Cedar policy in Keycard. From now on Keycard decides what can be bought for you.</p>
+        <p>ChipIn publishes your mission as a Cedar policy in Keycard. From now on Keycard decides what can be bought for you.</p>
 <pre>permit (principal, action, resource) when {
   context.scopes.contains("chipin:selection:…") &&
   (context.scopes.contains("brand:penn") || context.scopes.contains("brand:wilson")) &&
@@ -166,7 +165,7 @@
     <li class="step only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 8</span><h2>Keycard approves your pick</h2><span class="who">Keycard</span></div>
-        <p>You like ★ 8 × Penn Tour Extra Duty cans for $38.00. Chip In offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
+        <p>You like ★ 8 × Penn Tour Extra Duty cans for $38.00. ChipIn offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
         <div class="result"><b>ALLOW</b> Keycard: Tour Extra Duty Tennis Ball Can (brand Penn, pack can, mission total $38.00) under <code>chipin-mission-ui56-8dwly</code></div>
         <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn is in your list · Pack ✓ single can · Cost ✓ $38.00 of your $60.00</p>
       </div></li>
@@ -174,7 +173,7 @@
     <li class="step optional only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 9</span><h2>Purchase with a token</h2><span class="tag-opt">Optional · your choice</span></div>
-        <p>An authenticated person can complete the purchase. Chip In's resource token names the exact order's hash, the auth token comes back naming the same order, and a Stripe shared payment token, capped at the total, pays for it once.</p>
+        <p>An authenticated person can complete the purchase. ChipIn's resource token names the exact order's hash, the auth token comes back naming the same order, and a Stripe shared payment token, capped at the total, pays for it once.</p>
         <div class="result"><b>✓</b> Auth token bound to the order hash · Stripe SPT capped at $38.00 · payment succeeded (sandbox)</div>
         <p style="font-size:13.5px;color:var(--muted)">Sandbox only: no real money moves and no order is placed at the stores. Skip this step and the mission ends at the shortlist.</p>
       </div></li>
@@ -189,8 +188,8 @@
 
     <li class="step only-denied"><span class="check idle" aria-hidden="true">–</span>
       <div class="card">
-        <div class="head"><span class="n">Step 9</span><h2>Nothing to pay for</h2><span class="who">Chip In</span></div>
-        <p>Chip In's access server refuses the order, so no auth token is issued and no payment token is ever minted. Your money and your constraints stay intact.</p>
+        <div class="head"><span class="n">Step 9</span><h2>Nothing to pay for</h2><span class="who">ChipIn</span></div>
+        <p>ChipIn's access server refuses the order, so no auth token is issued and no payment token is ever minted. Your money and your constraints stay intact.</p>
         <div class="result deny"><b>✕</b> No auth token · no Stripe payment token · no charge</div>
       </div></li>
   </ol>

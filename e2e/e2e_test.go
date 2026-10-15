@@ -1,5 +1,5 @@
-// Package e2e runs the whole Chip In flow in process: real aauth-go v0.2
-// servers (AAuth.dev, Keycard), the Chip In MCP resource, the agent, a fake
+// Package e2e runs the whole ChipIn flow in process: real aauth-go v0.2
+// servers (AAuth.dev, Keycard), the ChipIn MCP resource, the agent, a fake
 // UCP store, and a fake Stripe that enforces shared payment token caps.
 package e2e
 
@@ -122,7 +122,7 @@ type deployment struct {
 
 func deploy(t *testing.T, maxOrderCents int64) *deployment { return deployWith(t, maxOrderCents, nil) }
 
-// deployWith starts Chip In (shop, agent provider, access server on one
+// deployWith starts ChipIn (shop, agent provider, access server on one
 // origin) and a local person server standing in for Hellō. live, when set,
 // replaces the fake Stripe.
 func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deployment {
@@ -230,7 +230,7 @@ func TestSelectionMission(t *testing.T) {
 		"G approves", // the mission, at the person server
 		"selection " + res.Mission[:10],
 		"DENY (local mission rules) Dunlop ATP Championship",
-		"Chip In AS ALLOW $31.92 for order " + o.OrderHash[:10],
+		"ALLOW $31.92 for order " + o.OrderHash[:10],
 	} {
 		if !strings.Contains(d.trace.String(), want) {
 			t.Errorf("trace lacks %q", want)
@@ -286,9 +286,9 @@ func TestApprovalBindsTheOrder(t *testing.T) {
 }
 
 func TestPerOrderCap(t *testing.T) {
-	d := deploy(t, 2000) // Chip In caps orders at $20
+	d := deploy(t, 2000) // ChipIn caps orders at $20
 	_, err := d.run(t, func(c *agent.Config) { c.TryOverBudget = false })
-	if err == nil || !strings.Contains(err.Error(), "need a human at Chip In") {
+	if err == nil || !strings.Contains(err.Error(), "need a human at ChipIn") {
 		t.Fatalf("err %v", err)
 	}
 	if len(d.stripe.payments) != 0 {

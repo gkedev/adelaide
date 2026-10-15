@@ -1,4 +1,4 @@
-// Package payments is Chip In's Stripe integration: Shared Payment Tokens
+// Package payments is ChipIn's Stripe integration: Shared Payment Tokens
 // (SPTs) for agent-initiated payments, with a plain test-card PaymentIntent
 // as the fallback when an account has no SPT access.
 //

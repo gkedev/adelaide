@@ -1,8 +1,8 @@
-// Command chipin runs Chip In, the AAuth v0.2 shopping demo.
+// Command chipin runs ChipIn, the AAuth v0.2 shopping demo.
 //
-//	chipin serve           Chip In on one origin: shop (MCP resource), agent
+//	chipin serve           ChipIn on one origin: shop (MCP resource), agent
 //	                       provider, access server, static site
-//	chipin agent           the shopping agent, against a running Chip In and
+//	chipin agent           the shopping agent, against a running ChipIn and
 //	                       a person server (Hellō by default)
 //	chipin demo            everything local in one process, with a local
 //	                       person server standing in for Hellō
@@ -74,7 +74,7 @@ func main() {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	var o options
 	fs.StringVar(&o.envFile, "env-file", ".env", "dotenv file with secrets (ignored when missing)")
-	fs.StringVar(&o.origin, "origin", env("CHIPIN_ORIGIN", "https://chipin.aauth.tech"), "serve: Chip In's public origin (its server identifier)")
+	fs.StringVar(&o.origin, "origin", env("CHIPIN_ORIGIN", "https://chipin.aauth.tech"), "serve: ChipIn's public origin (its server identifier)")
 	fs.StringVar(&o.listen, "listen", env("CHIPIN_LISTEN", ":8080"), "serve: listen address")
 	fs.StringVar(&o.ps, "ps", env("CHIPIN_PS", Hello), "person server the agent's tokens name")
 	fs.StringVar(&o.data, "data", env("CHIPIN_DATA", "data"), "serve: directory for persistent signing keys")
@@ -85,14 +85,14 @@ func main() {
 	fs.Float64Var(&o.budget, "max-cost", 60, "agent: the player's max cost for the mission, USD")
 	fs.StringVar(&o.packs, "packs", "can,24", "agent: the player's pack sizes (can, 12, 18, 24)")
 	fs.StringVar(&o.brands, "brands", "Penn,Dunlop", "agent: the player's brands (Dunlop, Penn, Tecnifibre, Wilson)")
-	fs.Float64Var(&o.dailyBudget, "daily-budget", envFloat("CHIPIN_DAILY_BUDGET", 0), "serve: most one person may spend per day at Chip In, USD (0: no daily limit)")
+	fs.Float64Var(&o.dailyBudget, "daily-budget", envFloat("CHIPIN_DAILY_BUDGET", 0), "serve: most one person may spend per day at ChipIn, USD (0: no daily limit)")
 	fs.Float64Var(&o.maxOrder, "max-order", envFloat("CHIPIN_MAX_ORDER", 150), "serve: per-order cap, USD")
 	fs.IntVar(&o.balls, "balls", 24, "agent: balls the crew needs")
 	fs.StringVar(&o.query, "query", "tennis balls", "agent: catalog search")
 	fs.StringVar(&o.buy, "buy", "", "agent: after the shortlist, buy nothing (default), \"best\", or item N; asks when run in a terminal")
 	fs.BoolVar(&o.guardrail, "show-guardrail", true, "agent: first try a product outside the mission, to show the refusal")
 	fs.StringVar(&o.enrollment, "enrollment-secret", env("CHIPIN_ENROLLMENT_SECRET", ""), "agent enrollment secret")
-	fs.StringVar(&o.shopURL, "shop", env("CHIPIN_SHOP_URL", "https://chipin.aauth.tech"), "agent: Chip In origin")
+	fs.StringVar(&o.shopURL, "shop", env("CHIPIN_SHOP_URL", "https://chipin.aauth.tech"), "agent: ChipIn origin")
 	fs.StringVar(&o.out, "out", "testdata/catalog.json", "record-catalog: output file")
 	fs.BoolVar(&o.jsonOut, "json", false, "agent: print the result as JSON")
 	_ = fs.Parse(os.Args[2:])
@@ -122,7 +122,7 @@ func main() {
 
 func cents(usd float64) int64 { return int64(usd*100 + 0.5) }
 
-// host is Chip In on one origin.
+// host is ChipIn on one origin.
 type host struct {
 	shop    *shop.Shop
 	handler http.Handler
@@ -229,7 +229,7 @@ func serve(o options) error {
 	if os.Getenv("KEYCARD_CLIENT_ID") != "" {
 		enforcer = "Keycard zone " + os.Getenv("KEYCARD_ZONE_ID")
 	}
-	log("Chip In", fmt.Sprintf("serving %s on %s · person server %s · payment %s · missions enforced by %s · max order %s",
+	log("ChipIn", fmt.Sprintf("serving %s on %s · person server %s · payment %s · missions enforced by %s · max order %s",
 		o.origin, o.listen, o.ps, o.pay, enforcer, spend.Dollars(cents(o.maxOrder))))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -261,7 +261,7 @@ func runAgent(o options) error {
 	return report(o, res, log)
 }
 
-// demo runs Chip In, a local person server (standing in for Hellō), and the
+// demo runs ChipIn, a local person server (standing in for Hellō), and the
 // agent in one process on localhost.
 func demo(o options) error {
 	log := newLogger()
@@ -295,7 +295,7 @@ func demo(o options) error {
 	}
 	go func() { _ = http.Serve(shopLn, h.handler) }()
 	go func() { _ = http.Serve(psLn, psMux) }()
-	log("Demo", fmt.Sprintf("Chip In %s · local person server %s (stands in for Hellō) · payment %s", origin, psURL, o.pay))
+	log("Demo", fmt.Sprintf("ChipIn %s · local person server %s (stands in for Hellō) · payment %s", origin, psURL, o.pay))
 	res, err := agent.Run(context.Background(), agentConfig(o, origin, psURL, wallet, true, log))
 	if err != nil {
 		return err
@@ -371,7 +371,7 @@ func record(o options) error {
 func newLogger() func(role, msg string) {
 	var mu sync.Mutex
 	start := time.Now()
-	colors := map[string]string{"Agent": "36", "Person": "33", "Chip In AS": "35", "Chip In AP": "35", "Chip In": "32", "Stripe": "34", "Demo": "1"}
+	colors := map[string]string{"Agent": "36", "Person": "33", "ChipIn AS": "35", "ChipIn AP": "35", "ChipIn": "32", "Stripe": "34", "Demo": "1"}
 	fi, _ := os.Stdout.Stat()
 	tty := fi != nil && fi.Mode()&os.ModeCharDevice != 0
 	return func(role, msg string) {
