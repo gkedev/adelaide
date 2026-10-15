@@ -19,8 +19,18 @@
   .ball { width:18px; height:18px; border-radius:50%; background:var(--ball); position:relative; box-shadow:0 0 0 2px rgba(212,245,60,.25) }
   .ball:before, .ball:after { content:""; position:absolute; top:2px; bottom:2px; width:10px; border:2px solid #fff; border-color:transparent #fff transparent transparent; border-radius:50% }
   .ball:before { left:-5px } .ball:after { right:-5px; transform:scaleX(-1) }
-  h1 { font-size:clamp(28px,4.6vw,46px); line-height:1.12; margin:10px 0 12px; letter-spacing:-.02em }
-  h1 em { font-style:normal; color:var(--ball) }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px }
+  h1 { font-size:clamp(34px,5vw,52px); line-height:1.05; margin:10px 0 4px; letter-spacing:-.02em }
+  .tagline { margin:0 0 14px; color:var(--ball); font-weight:700; white-space:nowrap; letter-spacing:-.01em;
+             font-size:clamp(8px,2.5vw,22px); overflow:hidden }
+  .toggle { display:inline-flex; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; flex:none }
+  .toggle button { border:0; background:transparent; color:var(--muted); font:600 13px/1 inherit; font-family:inherit; padding:7px 12px; border-radius:999px; cursor:pointer }
+  .toggle button[aria-pressed="true"].ap { background:var(--okbg); color:var(--ok); box-shadow:inset 0 0 0 1px rgba(47,210,122,.5) }
+  .toggle button[aria-pressed="true"].de { background:var(--denybg); color:var(--deny); box-shadow:inset 0 0 0 1px rgba(255,107,107,.5) }
+  body[data-mode="approved"] .only-denied, body[data-mode="denied"] .only-approved { display:none }
+  .check.x { border-color:var(--deny); background:var(--denybg); color:var(--deny) }
+  .check.idle { border-color:var(--line); background:var(--panel); color:var(--muted) }
+  .mode-note { font-size:13px; color:var(--muted); margin:-14px 0 22px }
   .lead { color:var(--muted); font-size:17px; max-width:760px; margin:0 0 22px }
   .constraints { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 30px }
   .c { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px }
@@ -65,10 +75,17 @@
   }
 </style>
 </head>
-<body>
+<body data-mode="approved">
 <main>
-  <span class="kicker"><span class="ball"></span> ChipIn · AAuth demo</span>
-  <h1>ChipIn, Let's find tennis balls that meet your <em>demanding constraints!</em></h1>
+  <div class="top">
+    <span class="kicker"><span class="ball"></span> AAuth demo</span>
+    <div class="toggle" role="group" aria-label="Mission outcome">
+      <button type="button" class="ap" data-mode="approved" aria-pressed="true">✓ Approved</button>
+      <button type="button" class="de" data-mode="denied" aria-pressed="false">✕ Denied</button>
+    </div>
+  </div>
+  <h1>ChipIn</h1>
+  <p class="tagline">Let's find tennis balls that meet your demanding constraints!</p>
   <p class="lead">Tell the agent what you'll accept. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
 
   <div class="constraints" aria-label="The player's constraints">
@@ -77,6 +94,8 @@
     <div class="c"><small>Max cost</small><b>$60.00</b></div>
     <div class="c"><small>For</small><b>24 balls, Monday doubles</b></div>
   </div>
+  <p class="mode-note only-approved">Showing: Keycard <b style="color:var(--ok)">approves</b> a shortlisted product that meets every constraint.</p>
+  <p class="mode-note only-denied">Showing: Keycard <b style="color:var(--deny)">denies</b> a tempting product outside the mission.</p>
 
   <ol class="steps">
     <li class="step"><span class="check" aria-hidden="true">✓</span>
@@ -144,19 +163,35 @@
         <div class="result"><b>✓</b> 5 products across the stores meet every constraint</div>
       </div></li>
 
-    <li class="step"><span class="check" aria-hidden="true">✓</span>
+    <li class="step only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
-        <div class="head"><span class="n">Step 8</span><h2>The guardrail holds</h2><span class="who">Keycard</span></div>
-        <p>To prove it, the agent tries a tempting product outside your mission: a Penn 24-can case for $89.95, cheaper per ball but over your max.</p>
-        <div class="result deny"><b>DENY</b> Keycard: Penn Championship Extra Duty 24 Cans (pack 24, mission total $89.95) is outside your mission · no payment token minted</div>
+        <div class="head"><span class="n">Step 8</span><h2>Keycard approves your pick</h2><span class="who">Keycard</span></div>
+        <p>You like ★ 8 × Penn Tour Extra Duty cans for $38.00. Chip In offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
+        <div class="result"><b>ALLOW</b> Keycard: Tour Extra Duty Tennis Ball Can (brand Penn, pack can, mission total $38.00) under <code>chipin-mission-ui56-8dwly</code></div>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn is in your list · Pack ✓ single can · Cost ✓ $38.00 of your $60.00</p>
       </div></li>
 
-    <li class="step optional"><span class="check" aria-hidden="true">✓</span>
+    <li class="step optional only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 9</span><h2>Purchase with a token</h2><span class="tag-opt">Optional · your choice</span></div>
-        <p>Liked the results? An authenticated person can buy any shortlisted item. Chip In's resource token names the exact order's hash, the auth token comes back naming the same order, Keycard re-checks the line, and a Stripe shared payment token, capped at the total, pays for it once.</p>
-        <div class="result"><b>✓</b> 8 × Penn Tour Extra Duty, $38.00 · Keycard ALLOW · auth token bound to the order hash · Stripe SPT capped at $38.00 · payment succeeded (sandbox)</div>
-        <p style="font-size:13.5px;color:var(--muted)">Sandbox only: no real money moves and no order is placed at the stores. Run without <code>-buy</code> and the mission ends at the shortlist.</p>
+        <p>An authenticated person can complete the purchase. Chip In's resource token names the exact order's hash, the auth token comes back naming the same order, and a Stripe shared payment token, capped at the total, pays for it once.</p>
+        <div class="result"><b>✓</b> Auth token bound to the order hash · Stripe SPT capped at $38.00 · payment succeeded (sandbox)</div>
+        <p style="font-size:13.5px;color:var(--muted)">Sandbox only: no real money moves and no order is placed at the stores. Skip this step and the mission ends at the shortlist.</p>
+      </div></li>
+
+    <li class="step only-denied"><span class="check x" aria-hidden="true">✕</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 8</span><h2>Keycard denies an off-mission pick</h2><span class="who">Keycard</span></div>
+        <p>The agent tries a tempting product outside your mission: a Penn 24-can case for $89.95, cheaper per ball but over your max cost.</p>
+        <div class="result deny"><b>DENY</b> Keycard: Penn Championship Extra Duty 24 Cans (brand Penn, pack 24, mission total $89.95) is outside your mission</div>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn · Pack ✓ 24-can case · Cost ✕ $89.95 is over your $60.00</p>
+      </div></li>
+
+    <li class="step only-denied"><span class="check idle" aria-hidden="true">–</span>
+      <div class="card">
+        <div class="head"><span class="n">Step 9</span><h2>Nothing to pay for</h2><span class="who">Chip In</span></div>
+        <p>Chip In's access server refuses the order, so no auth token is issued and no payment token is ever minted. Your money and your constraints stay intact.</p>
+        <div class="result deny"><b>✕</b> No auth token · no Stripe payment token · no charge</div>
       </div></li>
   </ol>
 
@@ -172,5 +207,24 @@
     See every message in the <a href="/sequence/">sequence diagram</a> · source <a href="https://github.com/gkedev/adelaide">github.com/gkedev/adelaide</a> · results from live runs on 15 Oct 2026.
   </footer>
 </main>
+<script>
+  const buttons = document.querySelectorAll(".toggle button");
+  function setMode(mode) {
+    document.body.dataset.mode = mode;
+    buttons.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+    history.replaceState(null, "", "#" + mode);
+  }
+  buttons.forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  setMode(location.hash === "#denied" ? "denied" : "approved");
+
+  // Keep the tagline on one line at any width: shrink until it fits.
+  const tag = document.querySelector(".tagline");
+  function fit() {
+    tag.style.fontSize = "22px";
+    let size = 22;
+    while (tag.scrollWidth > tag.clientWidth && size > 8) { size -= 0.5; tag.style.fontSize = size + "px"; }
+  }
+  fit(); addEventListener("resize", fit);
+</script>
 </body>
 </html>
