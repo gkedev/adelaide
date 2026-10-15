@@ -193,7 +193,7 @@ func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Resul
 	cfg := agent.Config{
 		ShopURL: d.shopURL, APURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
 		TargetBalls: 24, BudgetCents: 6000, TryOverBudget: true, Wallet: d.wallet,
-		Packs: []string{"can", "24"}, Brands: []string{"Penn"},
+		Packs: []string{"can", "24"}, Brands: []string{"Penn"}, Buy: "best",
 		HTTPClient: &http.Client{Timeout: 20 * time.Second}, Insecure: true, Log: d.log,
 	}
 	if mutate != nil {
@@ -235,6 +235,25 @@ func TestSelectionMission(t *testing.T) {
 		if !strings.Contains(d.trace.String(), want) {
 			t.Errorf("trace lacks %q", want)
 		}
+	}
+}
+
+// TestShortlistOnly: by default the mission ends at the shortlist and
+// nothing is bought.
+func TestShortlistOnly(t *testing.T) {
+	d := deploy(t, 15000)
+	res, err := d.run(t, func(c *agent.Config) { c.Buy = "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Order != nil || len(d.stripe.payments) != 0 || len(d.stripe.caps) != 0 {
+		t.Fatalf("bought without the player's decision: %+v", res.Order)
+	}
+	if len(res.Shortlist) != 1 || res.Recommended != 0 || res.Shortlist[0].Quantity != 8 || res.Shortlist[0].TotalCents != 3192 {
+		t.Fatalf("shortlist %+v rec %d", res.Shortlist, res.Recommended)
+	}
+	if !strings.Contains(d.trace.String(), "nothing bought") {
+		t.Error("trace does not say nothing was bought")
 	}
 }
 

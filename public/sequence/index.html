@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Chip In · AAuth sequence</title>
+<title>Chip In · AAuth four-party sequence</title>
 <meta name="description" content="How Chip In's shopping agent buys tennis balls: Hellō approval, a Keycard-enforced selection mission, UCP stores, and a Stripe shared payment token.">
 <style>
   :root { --bg:#0f1115; --panel:#171a21; --line:#2a2f3a; --fg:#e8eaf0; --muted:#9aa3b2; --accent:#7ee0b8; }
@@ -45,15 +45,15 @@
 </head>
 <body>
 <main>
-  <h1>Chip In: a shopping agent with a Keycard-enforced mission</h1>
-  <p class="lead">The player picks pack sizes, brands, and a max cost. That choice becomes a <b>selection mission</b> across real UCP stores, approved by the player at their person server (Hellō) and enforced by <b>Keycard</b> as a Cedar policy. Every purchase is a per-call authorization: Chip In's resource token carries the exact order's hash, and the auth token is proof that order was approved. Payment is a Stripe shared payment token capped at that amount.</p>
+  <h1>Chip In: a shopping mission across stores, enforced by Keycard</h1>
+  <p class="lead">A demo of AAuth's <b>federated (four-party) access</b> model. <b>Hellō</b>, the person server, identifies the player. The player's conditions (pack sizes, brands, max cost) become a <b>mission</b> that downselects products across real <b>UCP</b> stores, enforced by <b>Keycard</b> as a Cedar policy. The mission ends with a ranked shortlist. Buying is the player's separate, optional choice: then Chip In's resource token carries the exact order's hash, the auth token is proof of that order, and payment is a <b>Stripe</b> shared payment token capped at the total.</p>
 
   <div class="chips">
-    <span class="chip"><b>AAuth</b> draft-11 · aauth-go v0.2</span>
-    <span class="chip"><b>Person server</b> Hellō</span>
+    <span class="chip"><b>AAuth</b> draft-11 · four-party · aauth-go v0.2</span>
+    <span class="chip"><b>Person server</b> Hellō (identity)</span>
     <span class="chip"><b>Mission enforcement</b> Keycard (Cedar)</span>
     <span class="chip"><b>Stores</b> Tennis Express · Holabird (UCP)</span>
-    <span class="chip"><b>Payment</b> Stripe SPT (sandbox)</span>
+    <span class="chip"><b>Payment</b> Stripe SPT (sandbox, optional)</span>
   </div>
 
   <div class="hint">↻ Rotate your phone sideways for the full diagram. Swipe to pan; the lane names stay on top.</div>
@@ -92,8 +92,7 @@ sequenceDiagram
     A->>C: mission_approve (person token)
     C-->>A: 401 auth-token<br/>resource token "mission:approve"
     A->>H: auth token request
-    H->>P: approve the mission
-    P-->>H: approve
+    Note over H: identifies the player (directed sub)
     H->>AS: federate (signed by Hellō)
     AS->>C: the person's own proposal?
     AS-->>H: auth token
@@ -101,9 +100,10 @@ sequenceDiagram
     A->>C: mission_approve (auth token)
     C->>K: publish Cedar policy<br/>(brands, packs, max cost)
     C-->>A: mission active<br/>enforced by Keycard
+    A->>P: shortlist, best price per ball first
 
-    Note over A,K: Guardrail: a product outside the mission
-    A->>C: cart_add Dunlop case<br/>checkout_authorize
+    Note over A,K: Guardrail: a product outside the mission (no payment)
+    A->>C: cart_add an off-mission product<br/>checkout_authorize
     C-->>A: 401 auth-token<br/>resource token (order hash)
     A->>H: auth token request
     H->>AS: federate
@@ -112,12 +112,11 @@ sequenceDiagram
     AS-->>H: denied
     H-->>A: refused<br/>(no payment token minted)
 
-    Note over A,S: Purchase within the mission
-    A->>C: cart_add Penn cans<br/>checkout_authorize
-    C-->>A: 401 auth-token<br/>resource token ($31.92 + order hash)
+    opt Player chooses to buy from the shortlist
+    P->>A: buy choice N
+    A->>C: cart_add<br/>checkout_authorize
+    C-->>A: 401 auth-token<br/>resource token ($ total + order hash)
     A->>H: auth token request
-    H->>P: approve this order
-    P-->>H: approve
     H->>AS: federate
     AS->>C: matches the offer? unpaid?
     AS->>K: evaluate the order line
@@ -129,14 +128,15 @@ sequenceDiagram
     C->>S: PaymentIntent<br/>(key = order hash)
     S-->>C: succeeded
     C-->>A: order paid
+    end
 </pre>
   </div>
 
   <div class="grid">
     <div class="box"><h3>Trust grows tool by tool</h3><p><code>catalog_search</code> needs an agent token, the cart and <code>mission_propose</code> a person token, and <code>mission_approve</code> and checkout an auth token for exactly what is approved.</p></div>
-    <div class="box"><h3>Offer and acceptance, both signed</h3><p>Chip In's resource token carries the order's SHA-256 (the offer). The auth token carries the same scope after the player approved (the acceptance). Chip In charges only that order, once.</p></div>
+    <div class="box"><h3>The mission downselects</h3><p>Brands, pack sizes and a max cost narrow the products across Tennis Express and Holabird to a ranked shortlist. The player reviews it; nothing is bought unless they choose to.</p></div>
     <div class="box"><h3>Keycard enforces the mission</h3><p>Approving the selection publishes a Cedar policy in the Keycard zone. Every order line is evaluated by Keycard: brand, pack size, and the mission's total spending against the max cost.</p></div>
-    <div class="box"><h3>The person exists apart from the agent</h3><p>Hellō, not the agent, approves. The agent can't approve its own purchase; it only carries the proof.</p></div>
+    <div class="box"><h3>If the player buys, the order is bound</h3><p>Chip In's resource token carries the order's SHA-256 (its offer); the auth token comes back naming the same order. Chip In charges only that order, once, with a Stripe token capped at its total.</p></div>
   </div>
 
   <footer>

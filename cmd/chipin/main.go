@@ -52,7 +52,7 @@ type options struct {
 	envFile, profile, fixture, pay   string
 	budget, dailyBudget, maxOrder    float64
 	balls                            int
-	query, packs, brands             string
+	query, packs, brands, buy        string
 	guardrail                        bool
 	enrollment, shopURL              string
 	out                              string
@@ -89,6 +89,7 @@ func main() {
 	fs.Float64Var(&o.maxOrder, "max-order", envFloat("CHIPIN_MAX_ORDER", 150), "serve: per-order cap, USD")
 	fs.IntVar(&o.balls, "balls", 24, "agent: balls the crew needs")
 	fs.StringVar(&o.query, "query", "tennis balls", "agent: catalog search")
+	fs.StringVar(&o.buy, "buy", "", "agent: after the shortlist, buy nothing (default), \"best\", or item N; asks when run in a terminal")
 	fs.BoolVar(&o.guardrail, "show-guardrail", true, "agent: first try a product outside the mission, to show the refusal")
 	fs.StringVar(&o.enrollment, "enrollment-secret", env("CHIPIN_ENROLLMENT_SECRET", ""), "agent enrollment secret")
 	fs.StringVar(&o.shopURL, "shop", env("CHIPIN_SHOP_URL", "https://chipin.aauth.tech"), "agent: Chip In origin")
@@ -306,7 +307,7 @@ func agentConfig(o options, shopURL, ps string, wallet *payments.Stripe, insecur
 	return agent.Config{
 		ShopURL: shopURL, APURL: shopURL, PSURL: ps, EnrollmentSecret: o.enrollment,
 		Query: o.query, TargetBalls: o.balls, BudgetCents: cents(o.budget), TryOverBudget: o.guardrail,
-		Packs: splitList(o.packs), Brands: splitList(o.brands),
+		Packs: splitList(o.packs), Brands: splitList(o.brands), Buy: o.buy, Decide: askPlayer,
 		Wallet: wallet, Insecure: insecure, Log: log,
 	}
 }
@@ -420,6 +421,30 @@ func envFloat(k string, def float64) float64 {
 		return f
 	}
 	return def
+}
+
+// askPlayer asks, in a terminal, whether to buy from the shortlist. Outside
+// a terminal it answers "none": nothing is bought unless -buy says so.
+func askPlayer(list []agent.Choice, rec int) string {
+	if fi, err := os.Stdin.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return "none"
+	}
+	hint := "a number"
+	if rec >= 0 {
+		hint = fmt.Sprintf("Enter for ★ %d, or a number", rec+1)
+	}
+	fmt.Printf("\nBuy from the shortlist? (%s, n to finish without buying): ", hint)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	switch line = strings.TrimSpace(line); line {
+	case "":
+		if rec >= 0 {
+			return "best"
+		}
+		return "none"
+	case "n", "N":
+		return "none"
+	}
+	return line
 }
 
 func splitList(s string) []string {

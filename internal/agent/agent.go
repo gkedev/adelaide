@@ -38,6 +38,12 @@ type Config struct {
 	// OnInteraction shows the person where to sign in or approve (URL and
 	// code); nil logs it.
 	OnInteraction func(url, code string)
+	// Buy is the player's decision after reviewing the shortlist: "" ends
+	// the run at the shortlist (default, nothing is bought), "best" buys
+	// the recommended choice, "N" buys shortlist item N (1-based). Decide,
+	// when set and Buy is "", asks the player instead.
+	Buy    string
+	Decide func(shortlist []Choice, recommended int) string
 	// Packs, Brands and BudgetCents (the max cost) are the player's
 	// choices: they become the selection mission Keycard enforces.
 	Packs  []string
@@ -60,10 +66,15 @@ type Config struct {
 
 // Result summarizes a run.
 type Result struct {
-	Agent   string      `json:"agent"`
-	Mission string      `json:"mission_s256"`
-	Order   *shop.Order `json:"order,omitempty"`
-	Denials []string    `json:"denials,omitempty"`
+	Agent   string `json:"agent"`
+	Mission string `json:"mission_s256"`
+	// Shortlist is the mission's result: the products across the stores
+	// that meet the player's conditions, best price per ball first, each
+	// with the quantity that covers the crew within the max cost.
+	Shortlist   []Choice    `json:"shortlist"`
+	Recommended int         `json:"recommended"` // index into Shortlist, -1 if none fits
+	Order       *shop.Order `json:"order,omitempty"`
+	Denials     []string    `json:"denials,omitempty"`
 }
 
 // Run performs the errand end to end.
@@ -214,12 +225,15 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		inMission = append(inMission, ucp.Offer{ID: p.OfferID, Store: p.Store, Title: p.Title, PriceCents: p.PriceCents,
 			Currency: spend.Currency, Available: true, Balls: 3 * p.Cans, Cans: p.Cans, Brand: p.Brand})
 	}
-	best, _ := choose(inMission, cfg.TargetBalls, cfg.BudgetCents)
-	if best == nil {
-		return nil, fmt.Errorf("no mission product gives %d balls within %s", cfg.TargetBalls, spend.Dollars(cfg.BudgetCents))
+	res.Shortlist, res.Recommended = shortlist(inMission, cfg.TargetBalls, cfg.BudgetCents)
+	log(fmt.Sprintf("shortlist: %d products meet %s", len(res.Shortlist), prop.Summary))
+	for i, c := range res.Shortlist {
+		mark := "  "
+		if i == res.Recommended {
+			mark = "★ "
+		}
+		log(fmt.Sprintf("%s%d. %s/ball · %d × %s at %s = %s", mark, i+1, spend.Dollars(c.PerBallCents), c.Quantity, c.Title, c.Store, spend.Dollars(c.TotalCents)))
 	}
-	log(fmt.Sprintf("plan: %d × %s at %s = %s (%s/ball)", best.qty, best.offer.Title, best.offer.Store,
-		spend.Dollars(best.cost()), spend.Dollars(best.offer.PerBallCents())))
 	value := offMission(found.Offers, prop.Mission.Criteria)
 
 	pay := func(label string) (*shop.Order, error) {
@@ -271,8 +285,21 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		}
 	}
 
-	// 4. The plan within budget: cart (person token), then pay (auth token).
-	if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": best.offer.ID, "quantity": best.qty}, nil); err != nil {
+	// 5. The player decides: review only (default), or buy one choice.
+	decision := cfg.Buy
+	if decision == "" && cfg.Decide != nil && len(res.Shortlist) > 0 {
+		decision = cfg.Decide(res.Shortlist, res.Recommended)
+	}
+	pick, err := pickChoice(res.Shortlist, res.Recommended, decision)
+	if err != nil {
+		return nil, err
+	}
+	if pick == nil {
+		log("mission complete: shortlist ready, nothing bought (run with -buy best or -buy N to purchase)")
+		return res, nil
+	}
+	log(fmt.Sprintf("player chose to buy: %d × %s at %s = %s", pick.Quantity, pick.Title, pick.Store, spend.Dollars(pick.TotalCents)))
+	if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": pick.OfferID, "quantity": pick.Quantity}, nil); err != nil {
 		return nil, fmt.Errorf("cart_add: %w", err)
 	}
 	order, err := pay("within the mission")
@@ -283,6 +310,69 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	log(fmt.Sprintf("paid: order %s, %s, Stripe %s %s", order.ID, spend.Dollars(order.TotalCents), orNone(order.PaymentIntent), order.PaymentStatus))
 
 	return res, nil
+}
+
+// Choice is one shortlisted product with the quantity the agent proposes.
+type Choice struct {
+	OfferID      string `json:"offer_id"`
+	Store        string `json:"store"`
+	Title        string `json:"title"`
+	Brand        string `json:"brand"`
+	Pack         string `json:"pack"`
+	UnitCents    int64  `json:"unit_cents"`
+	PerBallCents int64  `json:"per_ball_cents"`
+	Quantity     int    `json:"quantity"`
+	Balls        int    `json:"balls"`
+	TotalCents   int64  `json:"total_cents"`
+}
+
+// shortlist ranks the mission's products by price per ball. Each gets the
+// quantity covering target balls, capped by the max cost; the recommended
+// choice is the cheapest per ball that covers the crew within the max.
+func shortlist(products []ucp.Offer, target int, max int64) ([]Choice, int) {
+	var out []Choice
+	for _, o := range products {
+		if o.Balls <= 0 || o.PriceCents <= 0 {
+			continue
+		}
+		qty := (target + o.Balls - 1) / o.Balls
+		if int64(qty)*o.PriceCents > max {
+			qty = int(max / o.PriceCents)
+		}
+		if qty < 1 {
+			continue
+		}
+		out = append(out, Choice{OfferID: o.ID, Store: o.Store, Title: o.Title, Brand: o.Brand, Pack: packName(o.Cans),
+			UnitCents: o.PriceCents, PerBallCents: o.PerBallCents(), Quantity: qty, Balls: qty * o.Balls, TotalCents: int64(qty) * o.PriceCents})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].PerBallCents < out[j].PerBallCents })
+	rec := -1
+	for i, c := range out {
+		if c.Balls >= target {
+			rec = i
+			break
+		}
+	}
+	return out, rec
+}
+
+// pickChoice applies the player's decision: "" or "none" buys nothing.
+func pickChoice(list []Choice, rec int, decision string) (*Choice, error) {
+	switch d := strings.ToLower(strings.TrimSpace(decision)); d {
+	case "", "none", "no", "skip":
+		return nil, nil
+	case "best", "yes":
+		if rec < 0 {
+			return nil, errors.New("no shortlisted product covers the crew within the max cost")
+		}
+		return &list[rec], nil
+	default:
+		var n int
+		if _, err := fmt.Sscan(d, &n); err != nil || n < 1 || n > len(list) {
+			return nil, fmt.Errorf("buy %q: choose best or 1..%d", decision, len(list))
+		}
+		return &list[n-1], nil
+	}
 }
 
 // offMission is the most tempting pressurized product the catalog search
