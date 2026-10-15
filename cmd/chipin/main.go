@@ -434,7 +434,13 @@ func askPlayer(list []agent.Choice, rec int) string {
 		hint = fmt.Sprintf("Enter for ★ %d, or a number", rec+1)
 	}
 	fmt.Printf("\nBuy from the shortlist? (%s, n to finish without buying): ", hint)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		// No answer (end of input, e.g. /dev/null, which also looks like a
+		// character device): never treat silence as a purchase.
+		fmt.Println()
+		return "none"
+	}
 	switch line = strings.TrimSpace(line); line {
 	case "":
 		if rec >= 0 {
