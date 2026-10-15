@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ChipIn, Let's find tennis balls that meet your tennis crew's demanding constraints!</title>
-<meta name="description" content="An AI agent finds tennis balls across real stores that meet your brand, pack and price constraints: AAuth four-party access with Hellō, Keycard, UCP and Stripe.">
+<title>ChipIn - Recommendation Agent · Let's find tennis balls that meet your tennis crew's demanding constraints!</title>
+<meta name="description" content="An AI agent finds tennis balls across real stores that meet your brand, case size and price constraints: AAuth four-party access with Hellō, Keycard, UCP and Stripe.">
 <style>
   :root {
     --bg:#0c1220; --panel:#131b2e; --panel2:#18223a; --line:#26314d; --fg:#eef2fa; --muted:#9aa6c0;
@@ -20,7 +20,7 @@
   .ball:before, .ball:after { content:""; position:absolute; top:2px; bottom:2px; width:10px; border:2px solid #fff; border-color:transparent #fff transparent transparent; border-radius:50% }
   .ball:before { left:-5px } .ball:after { right:-5px; transform:scaleX(-1) }
   .top { display:flex; align-items:center; justify-content:space-between; gap:12px }
-  h1 { font-size:clamp(34px,5vw,52px); line-height:1.05; margin:10px 0 4px; letter-spacing:-.02em }
+  h1 { font-size:clamp(28px,4.4vw,46px); line-height:1.05; margin:10px 0 4px; letter-spacing:-.02em }
   .tagline { margin:0 0 14px; color:var(--ball); font-weight:700; white-space:nowrap; letter-spacing:-.01em;
              font-size:clamp(8px,2.5vw,22px); overflow:hidden }
   .toggle { display:inline-flex; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; flex:none }
@@ -30,9 +30,6 @@
   body[data-mode="approved"] .only-denied, body[data-mode="denied"] .only-approved { display:none }
   .check.x { border-color:var(--deny); background:var(--denybg); color:var(--deny) }
   .check.idle { border-color:var(--line); background:var(--panel); color:var(--muted) }
-  .packs { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px }
-  .pk { font-size:13px; font-weight:700; border:1px solid var(--line); border-radius:8px; padding:3px 8px; color:#5d6884 }
-  .pk.on { color:#0c1220; background:var(--ball); border-color:var(--ball) }
   .mode-note { font-size:13px; color:var(--muted); margin:-14px 0 22px }
   .lead { color:var(--muted); font-size:17px; max-width:760px; margin:0 0 22px }
   .constraints { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 30px }
@@ -71,6 +68,7 @@
   a { color:var(--ball) }
   @media (max-width:640px) {
     main { padding:28px 14px 50px }
+    h1 { font-size:24px }
     .step { padding-left:52px } .steps:before { left:17px }
     .check { width:36px; height:36px; font-size:18px }
     .hide-sm { display:none }
@@ -87,13 +85,13 @@
       <button type="button" class="de" data-mode="denied" aria-pressed="false">✕ Denied</button>
     </div>
   </div>
-  <h1>ChipIn</h1>
+  <h1>ChipIn - Recommendation Agent</h1>
   <p class="tagline">Let's find tennis balls that meet your tennis crew's demanding constraints!</p>
   <p class="lead">Tell the recommendation agent what tennis balls you prefer. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
 
   <div class="constraints" aria-label="The player's constraints">
     <div class="c"><small>Brands</small><b>Penn · Wilson</b></div>
-    <div class="c"><small>Packs (cans)</small><div class="packs"><span class="pk on">12</span><span class="pk">18</span><span class="pk on">24</span></div></div>
+    <div class="c"><small>Case (cans)</small><b>24</b></div>
     <div class="c"><small>Max cost</small><b>$100.00</b></div>
   </div>
   <p class="mode-note only-approved">Showing: Keycard <b style="color:var(--ok)">approves</b> a shortlisted product that meets every constraint.</p>
@@ -124,8 +122,8 @@
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 4</span><h2>Your constraints become a mission</h2><span class="who">ChipIn</span></div>
-        <p>ChipIn searches each brand you chose across both stores and keeps only the products that fit your packs and max cost.</p>
-        <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · 12-pack, 24-pack · up to $100.00 · 12 of 87 live offers fit</div>
+        <p>You pick brands, one case size (12, 18 or 24 cans) and a max cost. ChipIn searches both stores and keeps only the products that fit.</p>
+        <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · 24-can case · up to $100.00 · 6 of 80 live offers fit</div>
       </div></li>
 
     <li class="step"><span class="check" aria-hidden="true">✓</span>
@@ -142,7 +140,7 @@
 <pre>permit (principal, action, resource) when {
   context.scopes.contains("chipin:selection:…") &&
   (context.scopes.contains("brand:penn") || context.scopes.contains("brand:wilson")) &&
-  (context.scopes.contains("pack:12") || context.scopes.contains("pack:24")) &&
+  context.scopes.contains("pack:24") &&
   context.scopes.contains("spend:within:usd:10000")
 };</pre>
         <div class="result"><b>✓</b> Policy <code>chipin-mission-…</code> published in the Keycard zone</div>
@@ -155,26 +153,24 @@
         <table>
           <thead><tr><th></th><th>Product</th><th class="hide-sm">Store</th><th class="num">Per ball</th><th class="num">Price</th></tr></thead>
           <tbody>
-            <tr class="star"><td>★</td><td>Wilson Intrigue All Court 12-pack case</td><td class="hide-sm">Tennis Express</td><td class="num">$1.25</td><td class="num">$44.95</td></tr>
-            <tr><td>2</td><td>Penn Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
-            <tr><td>3</td><td>Penn Championship Regular Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
-            <tr><td>4</td><td>Penn Championship Extra Duty case (24)</td><td class="hide-sm">Tennis Express</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
-            <tr><td>5</td><td>Penn Championship Pink case (24)</td><td class="hide-sm">Tennis Express</td><td class="num">$1.38</td><td class="num">$99.00</td></tr>
-            <tr><td>6</td><td>Wilson Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.39</td><td class="num">$99.95</td></tr>
-            <tr><td>8</td><td>Penn Championship Extra Duty 12 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.53</td><td class="num">$54.95</td></tr>
-            <tr><td>11</td><td>Wilson US Open Extra Duty 12 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$2.08</td><td class="num">$75.00</td></tr>
+            <tr class="star"><td>★</td><td>Penn Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>2</td><td>Penn Championship Regular Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>3</td><td>Penn Championship Extra Duty case</td><td class="hide-sm">Tennis Express</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>4</td><td>Penn Championship Pink case</td><td class="hide-sm">Tennis Express</td><td class="num">$1.38</td><td class="num">$99.00</td></tr>
+            <tr><td>5</td><td>Wilson Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.39</td><td class="num">$99.95</td></tr>
+            <tr><td>6</td><td>Wilson Championship Extra Duty case</td><td class="hide-sm">Tennis Express</td><td class="num">$1.39</td><td class="num">$99.99</td></tr>
           </tbody>
         </table>
-        <p style="font-size:13.5px;color:var(--muted)">Showing 8 of 12. Packs are 12, 18 or 24 cans, what the stores actually sell. A 24-can case of match balls runs $89.95 and up.</p>
-        <div class="result"><b>✓</b> 12 products across the two stores meet every constraint</div>
+        <p style="font-size:13.5px;color:var(--muted)">Every 24-can case of Penn or Wilson match balls at $100 or less, across both stores. A 24-can case runs $89.95 and up.</p>
+        <div class="result"><b>✓</b> 6 products across the two stores meet every constraint</div>
       </div></li>
 
     <li class="step only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 8</span><h2>Keycard approves your pick</h2><span class="who">Keycard</span></div>
-        <p>You pick #2, a Penn Championship Extra Duty 24-can case for $89.95. ChipIn offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
-        <div class="result"><b>ALLOW</b> Keycard: Penn Championship Extra Duty 24 Cans (brand Penn, pack 24, mission total $89.95) under <code>chipin-mission-xzjydfoy1j</code></div>
-        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn · Pack ✓ 24-pack · Cost ✓ $89.95 of your $100.00 · auth token issued, bound to this order</p>
+        <p>You take ★, a Penn Championship Extra Duty 24-can case for $89.95 from Holabird. ChipIn offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
+        <div class="result"><b>ALLOW</b> Keycard: Penn Championship Extra Duty 24 Cans (brand Penn, pack 24, mission total $89.95) under <code>chipin-mission-mmep0gyj3m</code></div>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn · Case ✓ 24 cans · Cost ✓ $89.95 of your $100.00 · auth token issued, bound to this order</p>
       </div></li>
 
     <li class="step optional only-approved"><span class="check" aria-hidden="true">✓</span>
@@ -190,7 +186,7 @@
         <div class="head"><span class="n">Step 8</span><h2>Keycard denies an off-mission pick</h2><span class="who">Keycard</span></div>
         <p>The agent tries a tempting product outside your mission: a Dunlop ATP Championship 24-can case for $99.99. It's under your max, but Dunlop isn't on your list.</p>
         <div class="result deny"><b>DENY</b> Keycard: Dunlop ATP Championship Regular Duty 24 Cans (brand Dunlop, pack 24, mission total $99.99) is outside your mission</div>
-        <p style="font-size:13.5px;color:var(--muted)">Brand ✕ Dunlop is not Penn or Wilson · Pack ✓ 24-pack · Cost ✓ $99.99 within $100.00</p>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✕ Dunlop is not Penn or Wilson · Case ✓ 24 cans · Cost ✓ $99.99 within $100.00</p>
       </div></li>
 
     <li class="step only-denied"><span class="check idle" aria-hidden="true">–</span>
