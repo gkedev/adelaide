@@ -20,7 +20,8 @@
   .ball:before, .ball:after { content:""; position:absolute; top:2px; bottom:2px; width:10px; border:2px solid #fff; border-color:transparent #fff transparent transparent; border-radius:50% }
   .ball:before { left:-5px } .ball:after { right:-5px; transform:scaleX(-1) }
   .top { display:flex; align-items:center; justify-content:space-between; gap:12px }
-  h1 { font-size:clamp(28px,4.4vw,46px); line-height:1.05; margin:10px 0 4px; letter-spacing:-.02em }
+  h1 { display:flex; align-items:center; flex-wrap:wrap; gap:4px 14px; font-size:clamp(34px,5vw,52px); line-height:1.05; margin:10px 0 4px; letter-spacing:-.02em }
+  h1 .sub { color:var(--fg); font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; line-height:1 }
   .tagline { margin:0 0 14px; color:var(--ball); font-weight:700; white-space:nowrap; letter-spacing:-.01em;
              font-size:clamp(8px,2.5vw,22px); overflow:hidden }
   .toggle { display:inline-flex; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; flex:none }
@@ -68,7 +69,7 @@
   a { color:var(--ball) }
   @media (max-width:640px) {
     main { padding:28px 14px 50px }
-    h1 { font-size:24px }
+    h1 { font-size:34px }
     .step { padding-left:52px } .steps:before { left:17px }
     .check { width:36px; height:36px; font-size:18px }
     .hide-sm { display:none }
@@ -85,7 +86,7 @@
       <button type="button" class="de" data-mode="denied" aria-pressed="false">✕ Denied</button>
     </div>
   </div>
-  <h1>ChipIn - Recommendation Agent</h1>
+  <h1>ChipIn <span class="sub">Recommendation Agent</span></h1>
   <p class="tagline">Let's find tennis balls that meet your tennis crew's demanding constraints!</p>
   <p class="lead">Tell the recommendation agent what tennis balls you prefer. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy. Every step below ran live against Hellō, Keycard, Tennis Express, Holabird and Stripe's sandbox.</p>
 
