@@ -1,0 +1,5 @@
+.git
+.env
+*.dotenv
+data
+chipin

@@ -1,0 +1,28 @@
+# /docker/chipin/docker-compose.yml on the Hostinger VPS.
+# Source checked out at ./src; secrets in ./.env (chmod 600); keys in ./data.
+services:
+  chipin:
+    build: ./src
+    image: chipin:latest
+    container_name: chipin
+    restart: always
+    env_file: .env
+    environment:
+      CHIPIN_ORIGIN: https://chipin.aauth.tech
+      CHIPIN_PS: https://person.hello.coop
+    networks:
+      - app-net
+    volumes:
+      - ./public:/app/public:ro
+      - ./data:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=app-net"
+      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`)"
+      - "traefik.http.routers.chipin.entrypoints=websecure"
+      - "traefik.http.routers.chipin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.chipin.loadbalancer.server.port=8080"
+
+networks:
+  app-net:
+    external: true
