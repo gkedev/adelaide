@@ -168,7 +168,7 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	sh.Register(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	if o.public != "" {
-		mux.Handle("GET /", staticSite(o.public))
+		mux.Handle("/", staticSite(o.public)) // no method in the pattern: it would conflict with aauth-go's routes
 	}
 	return &host{shop: sh, handler: mux}, nil
 }
@@ -177,6 +177,10 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 func staticSite(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
 		if st, err := os.Stat(p); err != nil || (st.IsDir() && !exists(filepath.Join(p, "index.html"))) {
 			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
