@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gkedev/adelaide/internal/agent"
+	"github.com/gkedev/adelaide/internal/hosted"
 	"github.com/gkedev/adelaide/internal/localps"
 	"github.com/gkedev/adelaide/internal/payments"
 	"github.com/gkedev/adelaide/internal/selection"
@@ -46,7 +47,19 @@ func fakeStore(t *testing.T, products ...map[string]any) string {
 			} `json:"params"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.Params.Name != "search_catalog" || req.Params.Arguments.Meta["ucp-agent"]["profile"] == "" {
+		if req.Params.Arguments.Meta["ucp-agent"]["profile"] == "" {
+			http.Error(w, "bad UCP call", http.StatusBadRequest)
+			return
+		}
+		if req.Params.Name == "create_checkout" {
+			co, _ := json.Marshal(map[string]any{"id": "gid://shopify/Checkout/test", "status": "requires_escalation",
+				"continue_url": "https://store.example/cart/c/test", "currency": "USD",
+				"totals": []map[string]any{{"type": "total", "amount": 5495}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1,
+				"result": map[string]any{"content": []map[string]any{{"type": "text", "text": string(co)}}}})
+			return
+		}
+		if req.Params.Name != "search_catalog" {
 			http.Error(w, "bad UCP call", http.StatusBadRequest)
 			return
 		}
@@ -119,6 +132,7 @@ type deployment struct {
 	wallet         *payments.Stripe
 	trace          *strings.Builder
 	log            func(string, string)
+	catalog        *ucp.Client
 }
 
 func deploy(t *testing.T, maxOrderCents int64) *deployment { return deployWith(t, maxOrderCents, nil) }
@@ -188,7 +202,8 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	roles.Register(mux)
 	sh.Register(mux)
 	*chipH = mux
-	return &deployment{shopURL: chipSrv.URL, psURL: psSrv.URL, shop: sh, stripe: fs, wallet: st, trace: trace, log: log}
+	d := &deployment{shopURL: chipSrv.URL, psURL: psSrv.URL, shop: sh, stripe: fs, wallet: st, trace: trace, log: log, catalog: catalog}
+	return d
 }
 
 func (d *deployment) run(t *testing.T, mutate func(*agent.Config)) (*agent.Result, error) {
@@ -370,4 +385,69 @@ func TestLiveStripeSandbox(t *testing.T) {
 		t.Fatalf("order %+v", o)
 	}
 	t.Logf("Stripe sandbox payment: %s", o.DashboardURL)
+}
+
+// TestHostedBBFlow: the API BB Tennis calls. A search returns a shortlist,
+// the player chooses, Keycard's rules approve the exact order, and ChipIn
+// hands back the store's own checkout link; nothing is charged by ChipIn.
+func TestHostedBBFlow(t *testing.T) {
+	d := deploy(t, 15000)
+	svc := hosted.New(hosted.Config{APIKey: "bb-key", ShopURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
+		Catalog: d.catalog, Log: d.log, Insecure: true})
+	mux := http.NewServeMux()
+	svc.Register(mux)
+	api := httptest.NewServer(mux)
+	t.Cleanup(api.Close)
+	call := func(method, path, body string, out any) int {
+		req, _ := http.NewRequest(method, api.URL+path, strings.NewReader(body))
+		req.Header.Set("X-ChipIn-Key", "bb-key")
+		req.Header.Set("X-BB-Player", "player-uuid-1")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if out != nil {
+			_ = json.NewDecoder(res.Body).Decode(out)
+		}
+		return res.StatusCode
+	}
+	var job hosted.Job
+	if code := call("POST", "/api/bb/recommend", `{"brands":["Penn"],"case":"12","max_cost":60}`, &job); code != http.StatusAccepted {
+		t.Fatalf("recommend: %d", code)
+	}
+	wait := func(status string) {
+		t.Helper()
+		for i := 0; i < 100 && job.Status != status && job.Status != "error"; i++ {
+			time.Sleep(50 * time.Millisecond)
+			call("GET", "/api/bb/jobs/"+job.ID, "", &job)
+		}
+		if job.Status != status {
+			t.Fatalf("status %q (want %q): %s\n%s", job.Status, status, job.Message, d.trace.String())
+		}
+	}
+	wait("shortlist")
+	if len(job.Shortlist) != 1 || job.Shortlist[0].TotalCents != 5495 {
+		t.Fatalf("shortlist %+v", job.Shortlist)
+	}
+	// Another player cannot see or act on this search.
+	req, _ := http.NewRequest("GET", api.URL+"/api/bb/jobs/"+job.ID, nil)
+	req.Header.Set("X-ChipIn-Key", "bb-key")
+	req.Header.Set("X-BB-Player", "someone-else")
+	if res, _ := http.DefaultClient.Do(req); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("other player got %d", res.StatusCode)
+	}
+	call("POST", "/api/bb/jobs/"+job.ID+"/choose", `{"choice":"1"}`, &job)
+	wait("checkout")
+	if job.Checkout == nil || job.Checkout.URL != "https://store.example/cart/c/test" || job.Picked == nil {
+		t.Fatalf("checkout %+v", job.Checkout)
+	}
+	if !strings.Contains(d.trace.String(), "ALLOW $54.95 for order") || len(d.stripe.payments) != 0 {
+		t.Fatalf("not authorized, or charged:\n%s", d.trace.String())
+	}
+	// Without BB's key, nothing.
+	req, _ = http.NewRequest("POST", api.URL+"/api/bb/recommend", strings.NewReader(`{}`))
+	if res, _ := http.DefaultClient.Do(req); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no key: %d", res.StatusCode)
+	}
 }

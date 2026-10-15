@@ -526,3 +526,114 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// Checkout is a checkout created at a store. The buyer completes it at URL,
+// on the store's own checkout, with their contact, shipping, and payment.
+type Checkout struct {
+	ID         string `json:"id"`
+	Store      string `json:"store"`
+	URL        string `json:"url"`
+	Status     string `json:"status"`
+	TotalCents int64  `json:"total_cents"`
+	Currency   string `json:"currency"`
+}
+
+// CreateCheckout creates a checkout for qty of a variant at the named store
+// (UCP create_checkout) and returns where the buyer continues. It never
+// completes a checkout: the buyer enters payment and shipping at the store.
+func (c *Client) CreateCheckout(ctx context.Context, storeName, variantID string, qty int) (*Checkout, error) {
+	var store *Store
+	for i := range c.Stores {
+		if c.Stores[i].Name == storeName {
+			store = &c.Stores[i]
+		}
+	}
+	if store == nil {
+		return nil, fmt.Errorf("ucp: unknown store %q", storeName)
+	}
+	if variantID == "" || qty < 1 {
+		return nil, errors.New("ucp: a variant and quantity are required")
+	}
+	ep, err := c.endpoint(ctx, *store)
+	if err != nil {
+		return nil, err
+	}
+	call := map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{
+			"name": "create_checkout",
+			"arguments": map[string]any{
+				"meta": map[string]any{"ucp-agent": map[string]any{"profile": c.Profile}},
+				"checkout": map[string]any{
+					"line_items": []map[string]any{{"item": map[string]any{"id": variantID}, "quantity": qty}},
+					"context":    map[string]any{"address_country": "US", "currency": "USD"},
+				},
+			},
+		},
+	}
+	b, _ := json.Marshal(call)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	res, err := c.hc().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	var rpc struct {
+		Result *struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			Structured json.RawMessage `json:"structuredContent"`
+			IsError    bool            `json:"isError"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &rpc); err != nil || (rpc.Result == nil && rpc.Error == nil) {
+		return nil, fmt.Errorf("ucp: %s create_checkout: HTTP %d", store.Name, res.StatusCode)
+	}
+	if rpc.Error != nil {
+		return nil, fmt.Errorf("ucp: %s create_checkout: %s", store.Name, rpc.Error.Message)
+	}
+	payload := []byte(rpc.Result.Structured)
+	if (len(payload) == 0 || string(payload) == "null") && len(rpc.Result.Content) > 0 {
+		payload = []byte(rpc.Result.Content[0].Text)
+	}
+	var co struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		ContinueURL string `json:"continue_url"`
+		Currency    string `json:"currency"`
+		Totals      []struct {
+			Type   string `json:"type"`
+			Amount int64  `json:"amount"`
+		} `json:"totals"`
+		Checkout *json.RawMessage `json:"checkout"`
+	}
+	if err := json.Unmarshal(payload, &co); err != nil {
+		return nil, fmt.Errorf("ucp: %s checkout: %w", store.Name, err)
+	}
+	if co.Checkout != nil { // some stores wrap the object
+		_ = json.Unmarshal(*co.Checkout, &co)
+	}
+	if rpc.Result.IsError || !strings.HasPrefix(co.ContinueURL, "https://") {
+		return nil, fmt.Errorf("ucp: %s returned no checkout link: %s", store.Name, truncate(string(payload), 200))
+	}
+	out := &Checkout{ID: co.ID, Store: store.Name, URL: co.ContinueURL, Status: co.Status, Currency: strings.ToLower(co.Currency)}
+	for _, t := range co.Totals {
+		if t.Type == "total" {
+			out.TotalCents = t.Amount
+		}
+	}
+	return out, nil
+}

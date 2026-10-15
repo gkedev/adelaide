@@ -34,6 +34,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/gkedev/adelaide/internal/agent"
+	"github.com/gkedev/adelaide/internal/hosted"
 	"github.com/gkedev/adelaide/internal/keycard"
 	"github.com/gkedev/adelaide/internal/keys"
 	"github.com/gkedev/adelaide/internal/localps"
@@ -186,6 +187,14 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	mux := http.NewServeMux()
 	roles.Register(mux)
 	sh.Register(mux)
+	if key := os.Getenv("CHIPIN_BB_API_KEY"); key != "" && !insecure {
+		agentsDir := ""
+		if o.data != "" {
+			agentsDir = filepath.Join(o.data, "agents")
+		}
+		hosted.New(hosted.Config{APIKey: key, ShopURL: origin, PSURL: ps, EnrollmentSecret: o.enrollment,
+			KeysDir: agentsDir, Catalog: catalog, Log: log}).Register(mux)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /robots.txt", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

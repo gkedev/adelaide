@@ -9,6 +9,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +48,11 @@ type Config struct {
 	// AuthorizeOnly stops a purchase after Keycard and the access server
 	// approve the order (auth token issued), before any payment.
 	AuthorizeOnly bool
+	// Key is the agent's signing key (generated when nil), and AgentName
+	// the install name it enrolls under (default chipin-shopper): a hosted
+	// agent keeps one key and name per player.
+	Key       crypto.Signer
+	AgentName string
 	// Case (12, 18 or 24 cans), Brands and BudgetCents (the max cost) are
 	// the player's choices: they become the mission Keycard enforces.
 	Case   string
@@ -74,10 +80,14 @@ type Result struct {
 	// Shortlist is the mission's result: the products across the stores
 	// that meet the player's conditions, best price per ball first, each
 	// with the quantity that covers the crew within the max cost.
-	Shortlist   []Choice    `json:"shortlist"`
-	Recommended int         `json:"recommended"` // index into Shortlist, -1 if none fits
-	Order       *shop.Order `json:"order,omitempty"`
-	Denials     []string    `json:"denials,omitempty"`
+	Shortlist   []Choice `json:"shortlist"`
+	Recommended int      `json:"recommended"` // index into Shortlist, -1 if none fits
+	// Picked is the player's choice; Authorized reports that ChipIn's access
+	// server and Keycard approved it (an auth token for the exact order).
+	Picked     *Choice     `json:"picked,omitempty"`
+	Authorized bool        `json:"authorized,omitempty"`
+	Order      *shop.Order `json:"order,omitempty"`
+	Denials    []string    `json:"denials,omitempty"`
 }
 
 // Run performs the errand end to end.
@@ -100,15 +110,19 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	log := func(msg string) { cfg.Log("Agent", msg) }
 
 	// 1. An agent identity from AAuth.dev, bound to a key only this agent holds.
-	key, err := aauth.GenerateKey(aauth.AlgEd25519)
-	if err != nil {
-		return nil, err
+	key := cfg.Key
+	if key == nil {
+		var err error
+		if key, err = aauth.GenerateKey(aauth.AlgEd25519); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.APURL == "" {
 		cfg.APURL = cfg.ShopURL
 	}
 	apc := &agentprovider.Client{BaseURL: cfg.APURL, HTTPClient: &http.Client{
-		Timeout: 30 * time.Second, Transport: headerRT{trust.EnrollHeader, cfg.EnrollmentSecret, cfg.HTTPClient.Transport},
+		Timeout: 30 * time.Second, Transport: headerRT{trust.EnrollHeader, cfg.EnrollmentSecret,
+			headerRT{trust.AgentNameHeader, cfg.AgentName, cfg.HTTPClient.Transport}},
 	}}
 	issue := func(ctx context.Context) (*agentprovider.TokenResponse, error) { return apc.Issue(ctx, key, nil) }
 	first, err := issue(ctx)
@@ -225,7 +239,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 
 	var inMission []ucp.Offer
 	for _, p := range prop.Mission.Products {
-		inMission = append(inMission, ucp.Offer{ID: p.OfferID, Store: p.Store, Title: p.Title, PriceCents: p.PriceCents,
+		inMission = append(inMission, ucp.Offer{ID: p.OfferID, VariantID: p.VariantID, URL: p.URL, Store: p.Store, Title: p.Title, PriceCents: p.PriceCents,
 			Currency: spend.Currency, Available: true, Balls: 3 * p.Cans, Cans: p.Cans, Brand: p.Brand})
 	}
 	res.Shortlist, res.Recommended = shortlist(inMission, cfg.TargetBalls, cfg.BudgetCents)
@@ -310,7 +324,8 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 	order, err := pay("within the mission")
 	if errors.Is(err, errAuthorizedOnly) {
-		log(fmt.Sprintf("authorized: auth token bound to this order; payment not made (authorize-only run)"))
+		res.Picked, res.Authorized = pick, true
+		log("authorized: auth token bound to this order; payment not made (authorize-only run)")
 		return res, nil
 	}
 	if err != nil {
@@ -327,6 +342,8 @@ var errAuthorizedOnly = errors.New("authorized; payment skipped")
 // Choice is one shortlisted product with the quantity the agent proposes.
 type Choice struct {
 	OfferID      string `json:"offer_id"`
+	VariantID    string `json:"variant_id,omitempty"`
+	URL          string `json:"url,omitempty"`
 	Store        string `json:"store"`
 	Title        string `json:"title"`
 	Brand        string `json:"brand"`
@@ -354,7 +371,7 @@ func shortlist(products []ucp.Offer, target int, max int64) ([]Choice, int) {
 		if qty < 1 {
 			continue
 		}
-		out = append(out, Choice{OfferID: o.ID, Store: o.Store, Title: o.Title, Brand: o.Brand, Pack: packName(o.Cans),
+		out = append(out, Choice{OfferID: o.ID, VariantID: o.VariantID, URL: o.URL, Store: o.Store, Title: o.Title, Brand: o.Brand, Pack: packName(o.Cans),
 			UnitCents: o.PriceCents, PerBallCents: o.PerBallCents(), Quantity: qty, Balls: qty * o.Balls, TotalCents: int64(qty) * o.PriceCents})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].PerBallCents < out[j].PerBallCents })

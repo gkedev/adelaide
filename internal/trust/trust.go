@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -26,8 +27,14 @@ import (
 )
 
 // EnrollHeader carries the enrollment secret an agent install presents to
-// the agent provider (the demo's stand-in for signing in on a device).
-const EnrollHeader = "X-Chipin-Enrollment"
+// the agent provider (the demo's stand-in for signing in on a device), and
+// AgentNameHeader optionally names the install (one agent per player).
+const (
+	EnrollHeader    = "X-Chipin-Enrollment"
+	AgentNameHeader = "X-Chipin-Agent"
+)
+
+var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,40}$`)
 
 // Config configures the roles.
 type Config struct {
@@ -201,7 +208,14 @@ func (e enrollment) AuthorizeIssue(_ context.Context, req *http.Request, _ *agen
 	if e.r.cfg.EnrollmentSecret == "" || req.Header.Get(EnrollHeader) != e.r.cfg.EnrollmentSecret {
 		return nil, errors.New("unknown agent install")
 	}
-	return &agentprovider.Registration{Name: "chipin-shopper", PS: e.r.cfg.PS}, nil
+	name := "chipin-shopper"
+	if n := req.Header.Get(AgentNameHeader); n != "" {
+		if !agentName.MatchString(n) {
+			return nil, errors.New("bad agent name")
+		}
+		name = n
+	}
+	return &agentprovider.Registration{Name: name, PS: e.r.cfg.PS}, nil
 }
 
 func (enrollment) AuthorizeRefresh(context.Context, *agentprovider.RefreshRequest) (*agentprovider.Registration, error) {

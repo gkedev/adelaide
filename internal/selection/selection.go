@@ -112,6 +112,7 @@ func (c Criteria) Summary() string {
 // Product is one authorized product, as offered when the mission was made.
 type Product struct {
 	OfferID    string `json:"offer_id"`
+	VariantID  string `json:"variant_id,omitempty"` // the store's product variant, for its checkout
 	Store      string `json:"store"`
 	Title      string `json:"title"`
 	Brand      string `json:"brand"`
@@ -152,7 +153,7 @@ func New(shopper string, c Criteria, offers []ucp.Offer) *Mission {
 	for _, o := range offers {
 		if c.Matches(o) && !seen[o.ID] {
 			seen[o.ID] = true
-			m.Products = append(m.Products, Product{OfferID: o.ID, Store: o.Store, Title: o.Title, Brand: o.Brand, Cans: o.Cans, PriceCents: o.PriceCents, URL: o.URL})
+			m.Products = append(m.Products, Product{OfferID: o.ID, VariantID: o.VariantID, Store: o.Store, Title: o.Title, Brand: o.Brand, Cans: o.Cans, PriceCents: o.PriceCents, URL: o.URL})
 		}
 	}
 	slices.SortFunc(m.Products, func(a, b Product) int { return int(a.PriceCents - b.PriceCents) })
