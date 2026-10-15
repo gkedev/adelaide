@@ -22,6 +22,24 @@
   .box p { margin:0; color:var(--muted); font-size:13.5px }
   code { font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace; background:#232733; padding:1px 5px; border-radius:4px; color:#d6dbe6 }
   footer { margin-top:28px; color:var(--muted); font-size:13px }
+  .card { position:relative }
+  .lanes { display:none }
+  .hint, .jump { display:none }
+  /* Phones and small tablets: readable diagram you pan in a full-height panel. */
+  @media (max-width: 1100px) {
+    main { padding:14px 12px 40px }
+    h1 { font-size:18px }
+    .lead { font-size:13.5px; margin-bottom:12px }
+    .chips { display:none }
+    .jump { display:inline-block; margin:0 0 12px; font-size:14px }
+    .card { height:calc(100svh - 24px); overflow:auto; padding:0 8px 8px; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; scroll-margin-top:12px }
+    .card svg.main { max-width:none !important }
+    .lanes { display:block; position:sticky; top:0; z-index:2; background:#fff; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,.12) }
+    .lanes svg { max-width:none !important; display:block }
+  }
+  @media (max-width: 600px) and (orientation: portrait) {
+    .hint { display:block; background:#1f2a24; border:1px solid #2f4a3c; color:#bfeedd; border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:13.5px }
+  }
   a { color:var(--accent) }
 </style>
 </head>
@@ -38,7 +56,9 @@
     <span class="chip"><b>Payment</b> Stripe SPT (sandbox)</span>
   </div>
 
-  <div class="card">
+  <div class="hint">↻ Rotate your phone sideways for the full diagram. Swipe to pan; the lane names stay on top.</div>
+  <a class="jump" href="#diagram">Jump to diagram ↓</a>
+  <div class="card" id="diagram">
 <pre class="mermaid">
 sequenceDiagram
     autonumber
@@ -126,9 +146,35 @@ sequenceDiagram
 </main>
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  mermaid.initialize({ startOnLoad: true, theme: "default", sequence: { mirrorActors: true, showSequenceNumbers: true, useMaxWidth: true,
+  mermaid.initialize({ startOnLoad: false, theme: "default", sequence: { mirrorActors: true, showSequenceNumbers: true, useMaxWidth: true,
     actorFontSize: 14, messageFontSize: 13, noteFontSize: 13, actorMargin: 28, messageMargin: 30, boxMargin: 6, width: 120 },
     themeVariables: { fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" } });
+  await mermaid.run();
+
+  // Small screens: keep the diagram at a readable size (pan instead of
+  // shrinking it), and pin a copy of the participant row on top.
+  const small = matchMedia("(max-width: 1100px)");
+  function layout() {
+    const card = document.getElementById("diagram");
+    const svg = card.querySelector("pre svg");
+    if (!svg) return;
+    svg.classList.add("main");
+    card.querySelector(".lanes")?.remove();
+    if (!small.matches) { svg.style.width = ""; svg.removeAttribute("width"); return; }
+    const vb = svg.viewBox.baseVal, scale = 0.92;
+    const w = Math.round(vb.width * scale), h = Math.round(vb.height * scale);
+    svg.setAttribute("width", w); svg.setAttribute("height", h); svg.style.width = w + "px";
+    const actor = svg.querySelector("rect.actor, g.actor rect");
+    const band = actor ? (actor.getBBox().y + actor.getBBox().height + 6) * scale : 64;
+    const lanes = document.createElement("div");
+    lanes.className = "lanes"; lanes.style.width = w + "px"; lanes.style.height = Math.round(band) + "px";
+    lanes.style.marginBottom = -Math.round(band) + "px"; lanes.setAttribute("aria-hidden", "true");
+    const copy = svg.cloneNode(true); copy.classList.remove("main"); // keeps the id: Mermaid's styles are scoped to it
+    lanes.appendChild(copy);
+    card.insertBefore(lanes, card.firstChild);
+  }
+  layout();
+  small.addEventListener("change", layout);
 </script>
 </body>
 </html>
