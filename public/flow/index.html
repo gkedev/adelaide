@@ -30,6 +30,9 @@
   body[data-mode="approved"] .only-denied, body[data-mode="denied"] .only-approved { display:none }
   .check.x { border-color:var(--deny); background:var(--denybg); color:var(--deny) }
   .check.idle { border-color:var(--line); background:var(--panel); color:var(--muted) }
+  .packs { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px }
+  .pk { font-size:13px; font-weight:700; border:1px solid var(--line); border-radius:8px; padding:3px 8px; color:#5d6884 }
+  .pk.on { color:#0c1220; background:var(--ball); border-color:var(--ball) }
   .mode-note { font-size:13px; color:var(--muted); margin:-14px 0 22px }
   .lead { color:var(--muted); font-size:17px; max-width:760px; margin:0 0 22px }
   .constraints { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 30px }
@@ -90,11 +93,11 @@
 
   <div class="constraints" aria-label="The player's constraints">
     <div class="c"><small>Brands</small><b>Penn · Wilson</b></div>
-    <div class="c"><small>Packs</small><b>Single can · 24-can case</b></div>
-    <div class="c"><small>Max cost</small><b>$60.00</b></div>
+    <div class="c"><small>Packs (cans)</small><div class="packs"><span class="pk">4</span><span class="pk">8</span><span class="pk on">12</span><span class="pk">18</span><span class="pk on">24</span></div></div>
+    <div class="c"><small>Max cost</small><b>$100.00</b></div>
   </div>
   <p class="mode-note only-approved">Showing: Keycard <b style="color:var(--ok)">approves</b> a shortlisted product that meets every constraint.</p>
-  <p class="mode-note only-denied">Showing: Keycard <b style="color:var(--deny)">denies</b> a tempting product outside the mission.</p>
+  <p class="mode-note only-denied">Showing: Keycard <b style="color:var(--deny)">denies</b> a tempting product from a brand outside the mission.</p>
 
   <ol class="steps">
     <li class="step"><span class="check" aria-hidden="true">✓</span>
@@ -122,7 +125,7 @@
       <div class="card">
         <div class="head"><span class="n">Step 4</span><h2>Your constraints become a mission</h2><span class="who">ChipIn</span></div>
         <p>ChipIn searches each brand you chose across both stores and keeps only the products that fit your packs and max cost.</p>
-        <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · single can, 24-can case · up to $60.00</div>
+        <div class="result"><b>✓</b> Mission proposed: Penn, Wilson · 12-pack, 24-pack · up to $100.00 · 12 of 87 live offers fit</div>
       </div></li>
 
     <li class="step"><span class="check" aria-hidden="true">✓</span>
@@ -139,8 +142,8 @@
 <pre>permit (principal, action, resource) when {
   context.scopes.contains("chipin:selection:…") &&
   (context.scopes.contains("brand:penn") || context.scopes.contains("brand:wilson")) &&
-  (context.scopes.contains("pack:can") || context.scopes.contains("pack:24")) &&
-  context.scopes.contains("spend:within:usd:6000")
+  (context.scopes.contains("pack:12") || context.scopes.contains("pack:24")) &&
+  context.scopes.contains("spend:within:usd:10000")
 };</pre>
         <div class="result"><b>✓</b> Policy <code>chipin-mission-…</code> published in the Keycard zone</div>
       </div></li>
@@ -148,42 +151,46 @@
     <li class="step"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 7</span><h2>Your shortlist</h2><span class="who">Best price per ball first</span></div>
-        <p>Each product is sized to cover 24 balls within your max cost. ★ is the agent's pick.</p>
+        <p>Ranked by price per ball. ★ is the agent's pick; you choose.</p>
         <table>
-          <thead><tr><th></th><th>Product</th><th class="hide-sm">Store</th><th class="num">Per ball</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th></th><th>Product</th><th class="hide-sm">Store</th><th class="num">Per ball</th><th class="num">Price</th></tr></thead>
           <tbody>
-            <tr class="star"><td>★</td><td>8 × Penn Tour Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.58</td><td class="num">$38.00</td></tr>
-            <tr><td>2</td><td>8 × Intrigue All Court Pink can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.66</td><td class="num">$39.92</td></tr>
-            <tr><td>3</td><td>8 × Penn Championship Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.66</td><td class="num">$39.92</td></tr>
-            <tr><td>4</td><td>8 × Pro Penn Marathon+ XD can</td><td class="hide-sm">Tennis Express</td><td class="num">$1.83</td><td class="num">$44.00</td></tr>
-            <tr><td>5</td><td>8 × Wilson US Open Extra Duty can</td><td class="hide-sm">Tennis Express</td><td class="num">$2.20</td><td class="num">$52.72</td></tr>
+            <tr class="star"><td>★</td><td>Wilson Intrigue All Court 12-pack case</td><td class="hide-sm">Tennis Express</td><td class="num">$1.25</td><td class="num">$44.95</td></tr>
+            <tr><td>2</td><td>Penn Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>3</td><td>Penn Championship Regular Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>4</td><td>Penn Championship Extra Duty case (24)</td><td class="hide-sm">Tennis Express</td><td class="num">$1.25</td><td class="num">$89.95</td></tr>
+            <tr><td>5</td><td>Penn Championship Pink case (24)</td><td class="hide-sm">Tennis Express</td><td class="num">$1.38</td><td class="num">$99.00</td></tr>
+            <tr><td>6</td><td>Wilson Championship Extra Duty 24 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.39</td><td class="num">$99.95</td></tr>
+            <tr><td>8</td><td>Penn Championship Extra Duty 12 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$1.53</td><td class="num">$54.95</td></tr>
+            <tr><td>11</td><td>Wilson US Open Extra Duty 12 cans</td><td class="hide-sm">Holabird Sports</td><td class="num">$2.08</td><td class="num">$75.00</td></tr>
           </tbody>
         </table>
-        <div class="result"><b>✓</b> 5 products across the stores meet every constraint</div>
+        <p style="font-size:13.5px;color:var(--muted)">Showing 8 of 12. No single cans: one can isn't worth buying and shipping, and a 24-can case of match balls runs $89.95 and up.</p>
+        <div class="result"><b>✓</b> 12 products across the two stores meet every constraint</div>
       </div></li>
 
     <li class="step only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 8</span><h2>Keycard approves your pick</h2><span class="who">Keycard</span></div>
-        <p>You like ★ 8 × Penn Tour Extra Duty cans for $38.00. ChipIn offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
-        <div class="result"><b>ALLOW</b> Keycard: Tour Extra Duty Tennis Ball Can (brand Penn, pack can, mission total $38.00) under <code>chipin-mission-ui56-8dwly</code></div>
-        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn is in your list · Pack ✓ single can · Cost ✓ $38.00 of your $60.00</p>
+        <p>You pick #2, a Penn Championship Extra Duty 24-can case for $89.95. ChipIn offers the exact order, and before anything is authorized Keycard evaluates it against your mission policy.</p>
+        <div class="result"><b>ALLOW</b> Keycard: Penn Championship Extra Duty 24 Cans (brand Penn, pack 24, mission total $89.95) under <code>chipin-mission-xzjydfoy1j</code></div>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn · Pack ✓ 24-pack · Cost ✓ $89.95 of your $100.00 · auth token issued, bound to this order</p>
       </div></li>
 
     <li class="step optional only-approved"><span class="check" aria-hidden="true">✓</span>
       <div class="card">
         <div class="head"><span class="n">Step 9</span><h2>Purchase with a token</h2><span class="tag-opt">Optional · your choice</span></div>
         <p>An authenticated person can complete the purchase. ChipIn's resource token names the exact order's hash, the auth token comes back naming the same order, and a Stripe shared payment token, capped at the total, pays for it once.</p>
-        <div class="result"><b>✓</b> Auth token bound to the order hash · Stripe SPT capped at $38.00 · payment succeeded (sandbox)</div>
-        <p style="font-size:13.5px;color:var(--muted)">Sandbox only: no real money moves and no order is placed at the stores. Skip this step and the mission ends at the shortlist.</p>
+        <div class="result"><b>✓</b> Auth token for $89.95, bound to the order hash · next: a Stripe SPT capped at $89.95 pays it once</div>
+        <p style="font-size:13.5px;color:var(--muted)">This run stopped after authorization, so nothing was charged. The payment step itself is verified in Stripe's sandbox; no order is ever placed at the stores. Skip this step and the mission ends at the shortlist.</p>
       </div></li>
 
     <li class="step only-denied"><span class="check x" aria-hidden="true">✕</span>
       <div class="card">
         <div class="head"><span class="n">Step 8</span><h2>Keycard denies an off-mission pick</h2><span class="who">Keycard</span></div>
-        <p>The agent tries a tempting product outside your mission: a Penn 24-can case for $89.95, cheaper per ball but over your max cost.</p>
-        <div class="result deny"><b>DENY</b> Keycard: Penn Championship Extra Duty 24 Cans (brand Penn, pack 24, mission total $89.95) is outside your mission</div>
-        <p style="font-size:13.5px;color:var(--muted)">Brand ✓ Penn · Pack ✓ 24-can case · Cost ✕ $89.95 is over your $60.00</p>
+        <p>The agent tries a tempting product outside your mission: a Dunlop ATP Championship 24-can case for $99.99. It's under your max, but Dunlop isn't on your list.</p>
+        <div class="result deny"><b>DENY</b> Keycard: Dunlop ATP Championship Regular Duty 24 Cans (brand Dunlop, pack 24, mission total $99.99) is outside your mission</div>
+        <p style="font-size:13.5px;color:var(--muted)">Brand ✕ Dunlop is not Penn or Wilson · Pack ✓ 24-pack · Cost ✓ $99.99 within $100.00</p>
       </div></li>
 
     <li class="step only-denied"><span class="check idle" aria-hidden="true">–</span>
