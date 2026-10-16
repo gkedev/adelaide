@@ -413,9 +413,18 @@ func TestHostedBBFlow(t *testing.T) {
 		return res.StatusCode
 	}
 	var job hosted.Job
-	if code := call("POST", "/api/bb/recommend", `{"brands":["Penn"],"case":"12","max_cost":60}`, &job); code != http.StatusAccepted {
+	var raw map[string]any
+	if code := call("POST", "/api/bb/recommend", `{"brands":["Penn"],"case":"12","max_cost":60}`, &raw); code != http.StatusAccepted {
 		t.Fatalf("recommend: %d", code)
 	}
+	// The page reads steps.length and shortlist.length: never null.
+	if _, ok := raw["steps"].([]any); !ok {
+		t.Fatalf("steps is %T, want an array", raw["steps"])
+	}
+	if _, ok := raw["shortlist"].([]any); !ok {
+		t.Fatalf("shortlist is %T, want an array", raw["shortlist"])
+	}
+	job.ID, job.Status = raw["id"].(string), raw["status"].(string)
 	wait := func(status string) {
 		t.Helper()
 		for i := 0; i < 100 && job.Status != status && job.Status != "error"; i++ {

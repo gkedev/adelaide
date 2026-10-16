@@ -63,7 +63,7 @@ type Job struct {
 	Message     string         `json:"message,omitempty"`
 	SignIn      *SignIn        `json:"signin,omitempty"`
 	Summary     string         `json:"summary,omitempty"`
-	Shortlist   []agent.Choice `json:"shortlist,omitempty"`
+	Shortlist   []agent.Choice `json:"shortlist"`
 	Recommended int            `json:"recommended"`
 	Picked      *agent.Choice  `json:"picked,omitempty"`
 	Checkout    *ucp.Checkout  `json:"checkout,omitempty"`
@@ -181,7 +181,11 @@ func (s *Service) view(j *Job) Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := *j
-	c.Steps = append([]string(nil), j.Steps...)
+	// Lists are always JSON arrays, never null: the BB page reads .length.
+	c.Steps = append(make([]string, 0, len(j.Steps)), j.Steps...)
+	if c.Shortlist == nil {
+		c.Shortlist = []agent.Choice{}
+	}
 	return c
 }
 
