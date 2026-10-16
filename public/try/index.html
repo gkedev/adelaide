@@ -33,7 +33,9 @@
   .progress { display:flex; gap:12px; align-items:center }
   .spin { width:22px; height:22px; flex:none; border-radius:50%; border:3px solid rgba(212,245,60,.25); border-top-color:var(--ball); animation:spin 1s linear infinite }
   @keyframes spin { to { transform:rotate(360deg) } }
-  .code { font-size:14px; color:var(--muted); margin:10px 0 12px } .code b { color:var(--ball); font-size:22px; letter-spacing:.08em; margin-left:6px }
+  .code { font-size:14px; color:var(--muted); margin:10px 0 12px; display:flex; align-items:center; gap:8px } .code b { color:var(--ball); font-size:22px; letter-spacing:.08em; font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+  .copy { margin-left:auto; border:1px solid var(--ball); background:transparent; color:var(--ball); border-radius:999px; padding:5px 12px; font-size:13px; font-weight:800; font-family:inherit; cursor:pointer }
+  .copy.done { background:var(--ball); color:#0c1220 }
   .head { display:flex; justify-content:space-between; align-items:baseline; margin:4px 0 8px } .head span { color:var(--muted); font-size:13px }
   .item { display:grid; grid-template-columns:28px 1fr auto; gap:10px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--panel); margin-bottom:8px }
   .item.star { border-color:rgba(212,245,60,.55) }
@@ -66,7 +68,7 @@
   <section class="card" id="signin" hidden>
     <strong>Sign in with Hellō to continue</strong>
     <p class="note">One-time: link the recommendation agent to you. Hellō identifies you; ChipIn never sees your email.</p>
-    <div class="code">Code <b id="code"></b></div>
+    <div class="code">Code <b id="code"></b><button type="button" class="copy" id="copy" aria-label="Copy the code">Copy</button></div>
     <a class="go" id="hello" target="_blank" rel="noopener noreferrer">Open Hellō ↗</a>
   </section>
 
@@ -136,6 +138,17 @@ $('find').onclick = async () => {
 async function choose(i) {
   err(''); try { state.job = await api('jobs/' + state.job.id + '/choose', { choice: String(i + 1) }); state.job.status = 'authorizing'; render(); follow(); } catch (e) { err(e.message); }
 }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {
+    const a = document.createElement('textarea'); a.value = t; a.setAttribute('readonly', ''); a.style.position = 'fixed'; a.style.opacity = '0';
+    document.body.append(a); a.select(); a.setSelectionRange(0, t.length); const ok = document.execCommand('copy'); a.remove(); return ok;
+  }
+}
+$('copy').onclick = async () => {
+  const b = $('copy'), ok = await copyText($('code').textContent);
+  b.textContent = ok ? 'Copied ✓' : 'Copy failed'; b.classList.toggle('done', ok);
+  setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 2000);
+};
 chips();
 </script>
 </body>
