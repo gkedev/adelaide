@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ChipIn - Recommendation Agent · Try it</title>
+<style>
+  :root { --bg:#0c1220; --panel:#131b2e; --panel2:#18223a; --line:#26314d; --fg:#eef2fa; --muted:#9aa6c0;
+          --ball:#d4f53c; --ok:#2fd27a; --okbg:rgba(47,210,122,.12); --deny:#ff6b6b; --denybg:rgba(255,107,107,.12) }
+  * { box-sizing:border-box }
+  body { margin:0; background:radial-gradient(1200px 600px at 80% -10%, #1b2a4d 0%, var(--bg) 60%); color:var(--fg);
+         font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; min-height:100vh }
+  main { max-width:680px; margin:0 auto; padding:40px 18px 60px }
+  .kicker { display:inline-flex; align-items:center; gap:8px; color:var(--ball); font-weight:700; letter-spacing:.04em; font-size:13px; text-transform:uppercase }
+  .ball { width:18px; height:18px; border-radius:50%; background:var(--ball); box-shadow:0 0 0 2px rgba(212,245,60,.25) }
+  h1 { display:flex; align-items:center; flex-wrap:wrap; gap:4px 14px; font-size:clamp(34px,7vw,48px); line-height:1.05; margin:10px 0 6px; letter-spacing:-.02em }
+  h1 .sub { color:var(--fg); font-size:13px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; line-height:1 }
+  .tagline { color:var(--ball); font-weight:700; margin:0 0 6px }
+  .lead { color:var(--muted); margin:0 0 22px }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px 18px; margin:0 0 14px }
+  .field { display:grid; gap:8px; margin-bottom:14px }
+  .label { color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; display:flex; justify-content:space-between }
+  .label b { color:var(--fg); font-size:16px; letter-spacing:0 }
+  .opts { display:flex; flex-wrap:wrap; gap:8px }
+  .chip { border:1px solid var(--line); background:var(--panel2); color:var(--fg); border-radius:999px; padding:8px 14px; font:700 14px inherit; font-family:inherit; cursor:pointer }
+  .chip.on { background:var(--ball); border-color:var(--ball); color:#0c1220 }
+  input[type=range] { width:100%; accent-color:var(--ball) }
+  .go { display:block; width:100%; text-align:center; border:0; border-radius:12px; background:var(--ball); color:#0c1220; font:800 16px inherit; font-family:inherit; padding:13px; cursor:pointer; text-decoration:none }
+  .go[disabled] { opacity:.5; cursor:default }
+  .note { color:var(--muted); font-size:13.5px; margin:8px 0 0 }
+  .msg { background:var(--denybg); border:1px solid rgba(255,107,107,.4); border-radius:12px; padding:10px 12px; margin:0 0 14px }
+  .progress { display:flex; gap:12px; align-items:center }
+  .spin { width:22px; height:22px; flex:none; border-radius:50%; border:3px solid rgba(212,245,60,.25); border-top-color:var(--ball); animation:spin 1s linear infinite }
+  @keyframes spin { to { transform:rotate(360deg) } }
+  .code { font-size:14px; color:var(--muted); margin:10px 0 12px } .code b { color:var(--ball); font-size:22px; letter-spacing:.08em; margin-left:6px }
+  .head { display:flex; justify-content:space-between; align-items:baseline; margin:4px 0 8px } .head span { color:var(--muted); font-size:13px }
+  .item { display:grid; grid-template-columns:28px 1fr auto; gap:10px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--panel); margin-bottom:8px }
+  .item.star { border-color:rgba(212,245,60,.55) }
+  .rank { color:var(--muted); font-weight:800; text-align:center } .star .rank { color:var(--ball) }
+  .body strong { display:block; font-size:14.5px } .body span { color:var(--muted); font-size:12.5px }
+  .buy { display:grid; justify-items:end; gap:6px } .buy button { border:0; border-radius:999px; background:var(--ball); color:#0c1220; font:800 13px inherit; font-family:inherit; padding:6px 14px; cursor:pointer }
+  .ok { text-align:center; border-color:rgba(47,210,122,.45); background:var(--okbg) }
+  .tick { width:46px; height:46px; margin:0 auto 8px; border-radius:50%; display:grid; place-items:center; border:2px solid var(--ok); color:var(--ok); font-size:22px; font-weight:800 }
+  footer { margin-top:26px; color:var(--muted); font-size:13.5px } a { color:var(--ball) }
+  [hidden] { display:none !important }
+</style>
+</head>
+<body>
+<main>
+  <span class="kicker"><span class="ball"></span> AAuth demo · try it live</span>
+  <h1>ChipIn <span class="sub">Recommendation Agent</span></h1>
+  <p class="tagline">Let’s find tennis balls that meet your tennis crew’s demanding constraints!</p>
+  <p class="lead">Tell the recommendation agent what tennis balls you prefer. It searches real stores, keeps only what fits, and hands you a ranked shortlist. You decide whether to buy.</p>
+
+  <section class="card" aria-label="Your constraints">
+    <div class="field"><span class="label">Brands</span><div class="opts" id="brands"></div></div>
+    <div class="field"><span class="label">Case (cans)</span><div class="opts" id="cases" role="radiogroup" aria-label="Case size"></div></div>
+    <div class="field"><span class="label">Max cost <b id="maxv">$100.00</b></span><input id="max" type="range" min="40" max="200" step="5" value="100" aria-label="Max cost in dollars"></div>
+    <button class="go" id="find">Find tennis balls →</button>
+    <p class="note">Live: you sign in with your own Hellō account, the agent searches Tennis Express and Holabird Sports, and Keycard enforces your choices. Nothing is bought unless you choose to.</p>
+  </section>
+
+  <div class="msg" id="error" role="alert" hidden></div>
+
+  <section class="card" id="signin" hidden>
+    <strong>Sign in with Hellō to continue</strong>
+    <p class="note">One-time: link the recommendation agent to you. Hellō identifies you; ChipIn never sees your email.</p>
+    <div class="code">Code <b id="code"></b></div>
+    <a class="go" id="hello" target="_blank" rel="noopener noreferrer">Open Hellō ↗</a>
+  </section>
+
+  <section class="card progress" id="progress" hidden aria-live="polite"><span class="spin" aria-hidden="true"></span><div><strong id="ptitle"></strong><p class="note" id="pstep"></p></div></section>
+
+  <section id="list" hidden aria-label="Your shortlist"><div class="head"><strong>Your shortlist</strong><span>Best price per ball first</span></div><div id="items"></div>
+    <p class="note" id="listnote">Choosing a product asks Keycard to approve it against your mission. You then finish at the store with your own shipping and payment.</p></section>
+
+  <section class="card ok" id="approved" hidden>
+    <div class="tick" aria-hidden="true">✓</div>
+    <strong>Keycard approved your pick</strong>
+    <p class="note" id="apick"></p>
+    <a class="go" id="store" target="_blank" rel="noopener noreferrer"></a>
+    <p class="note">The store’s own secure checkout: enter your shipping and payment there only if you want to place the order. ChipIn never sees your card or address.</p>
+  </section>
+
+  <footer>How it works: the <a href="/flow/">flow walkthrough</a> and the <a href="/sequence/">sequence diagram</a> · AAuth four-party · Hellō · Keycard · UCP</footer>
+</main>
+<script>
+const BRANDS = ['Dunlop', 'Penn', 'Tecnifibre', 'Wilson'], CASES = ['12', '18', '24'];
+const state = { brands: new Set(['Penn', 'Wilson']), case: '24', job: null, timer: null };
+const $ = id => document.getElementById(id), money = c => '$' + (c / 100).toFixed(2);
+function chips() {
+  $('brands').innerHTML = ''; BRANDS.forEach(b => { const e = document.createElement('button'); e.className = 'chip' + (state.brands.has(b) ? ' on' : ''); e.textContent = b; e.setAttribute('aria-pressed', state.brands.has(b)); e.onclick = () => { state.brands.has(b) ? state.brands.delete(b) : state.brands.add(b); chips(); }; $('brands').append(e); });
+  $('cases').innerHTML = ''; CASES.forEach(c => { const e = document.createElement('button'); e.className = 'chip' + (state.case === c ? ' on' : ''); e.textContent = c; e.setAttribute('role', 'radio'); e.setAttribute('aria-checked', state.case === c); e.onclick = () => { state.case = c; chips(); }; $('cases').append(e); });
+  $('find').disabled = state.brands.size === 0 || busy();
+}
+$('max').oninput = () => { $('maxv').textContent = money($('max').value * 100); };
+const busy = () => state.job && ['searching', 'signin', 'authorizing'].includes(state.job.status);
+async function api(path, body) {
+  const r = await fetch('/api/try/' + path, { method: body ? 'POST' : 'GET', credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'ChipIn is unavailable. Please try again.');
+  d.steps = Array.isArray(d.steps) ? d.steps : []; d.shortlist = Array.isArray(d.shortlist) ? d.shortlist : [];
+  return d;
+}
+function err(m) { $('error').hidden = !m; $('error').textContent = m || ''; }
+function render() {
+  const j = state.job; chips();
+  $('signin').hidden = !(j && j.status === 'signin' && j.signin);
+  if (j && j.signin) { $('code').textContent = j.signin.code; $('hello').href = j.signin.url; }
+  $('progress').hidden = !(j && (j.status === 'searching' || j.status === 'authorizing'));
+  if (j) { $('ptitle').textContent = j.status === 'authorizing' ? 'Keycard is checking your pick against your mission…' : 'Searching Tennis Express and Holabird…'; $('pstep').textContent = j.steps[j.steps.length - 1] || ''; }
+  const show = j && j.shortlist.length && (j.status === 'shortlist' || j.status === 'done');
+  $('list').hidden = !show; $('items').innerHTML = ''; $('listnote').hidden = !(j && j.status === 'shortlist');
+  if (show) j.shortlist.forEach((c, i) => {
+    const a = document.createElement('article'); a.className = 'item' + (i === j.recommended ? ' star' : '');
+    a.innerHTML = `<div class="rank">${i === j.recommended ? '★' : i + 1}</div><div class="body"><strong></strong><span></span></div><div class="buy"><b>${money(c.total_cents)}</b></div>`;
+    a.querySelector('strong').textContent = c.title; a.querySelector('span').textContent = `${c.store} · ${money(c.per_ball_cents)}/ball`;
+    if (j.status === 'shortlist') { const b = document.createElement('button'); b.textContent = 'Buy'; b.onclick = () => choose(i); a.querySelector('.buy').append(b); }
+    $('items').append(a);
+  });
+  $('approved').hidden = !(j && j.status === 'checkout' && j.checkout);
+  if (j && j.checkout && j.picked) { $('apick').textContent = `${j.picked.quantity} × ${j.picked.title} · ${money(j.checkout.total_cents || j.picked.total_cents)} at ${j.checkout.store}`; $('store').href = j.checkout.url; $('store').textContent = `Continue to ${j.checkout.store} ↗`; }
+  if (j && j.status === 'done' && !j.shortlist.length) err(j.message || 'No products meet those choices right now. Try another brand, case size or max cost.');
+  if (j && j.status === 'error') err(j.message || 'Something went wrong. Please try again.');
+}
+function follow() {
+  clearTimeout(state.timer);
+  state.timer = setTimeout(async () => {
+    try { state.job = await api('jobs/' + state.job.id); render(); if (busy()) follow(); } catch (e) { err(e.message); }
+  }, 2000);
+}
+$('find').onclick = async () => {
+  err(''); try { state.job = await api('recommend', { brands: [...state.brands], case: state.case, max_cost: Number($('max').value) }); render(); follow(); } catch (e) { err(e.message); }
+};
+async function choose(i) {
+  err(''); try { state.job = await api('jobs/' + state.job.id + '/choose', { choice: String(i + 1) }); state.job.status = 'authorizing'; render(); follow(); } catch (e) { err(e.message); }
+}
+chips();
+</script>
+</body>
+</html>

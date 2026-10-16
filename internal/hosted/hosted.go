@@ -54,6 +54,10 @@ type Service struct {
 	cfg  Config
 	mu   sync.Mutex
 	jobs map[string]*Job
+
+	window time.Time
+	perIP  map[string]int
+	total  int
 }
 
 // Job is one recommendation run, as the BB page sees it.
@@ -84,14 +88,66 @@ func New(cfg Config) *Service {
 	if cfg.Log == nil {
 		cfg.Log = func(string, string) {}
 	}
-	return &Service{cfg: cfg, jobs: map[string]*Job{}}
+	return &Service{cfg: cfg, jobs: map[string]*Job{}, perIP: map[string]int{}}
 }
 
-// Register adds the API routes.
+// Register adds the API routes: /api/bb/* for BB Tennis (shared key), and
+// /api/try/* for the public demo page (a per-visitor cookie, rate limited).
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/bb/recommend", s.guard(s.recommend))
 	mux.HandleFunc("GET /api/bb/jobs/{id}", s.guard(s.get))
 	mux.HandleFunc("POST /api/bb/jobs/{id}/choose", s.guard(s.choose))
+	mux.HandleFunc("POST /api/try/recommend", s.visitor(true, s.recommend))
+	mux.HandleFunc("GET /api/try/jobs/{id}", s.visitor(false, s.get))
+	mux.HandleFunc("POST /api/try/jobs/{id}/choose", s.visitor(false, s.choose))
+}
+
+const tryCookie = "chipin_try"
+
+// visitor admits public demo visitors: each browser gets its own opaque id
+// (so its own agent and Hellō link), and new searches are rate limited per
+// IP and overall.
+func (s *Service) visitor(limited bool, h handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if o := r.Header.Get("Origin"); o != "" && o != s.cfg.ShopURL {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "use the ChipIn demo page"})
+			return
+		}
+		id := ""
+		if c, err := r.Cookie(tryCookie); err == nil && len(c.Value) == 32 {
+			id = c.Value
+		} else {
+			id = newID() + newID()[:8]
+			http.SetCookie(w, &http.Cookie{Name: tryCookie, Value: id, Path: "/", MaxAge: 30 * 24 * 3600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		}
+		if limited {
+			ip := r.Header.Get("CF-Connecting-IP")
+			if ip == "" {
+				ip = r.RemoteAddr
+			}
+			if !s.allow(ip) {
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Lots of searches right now. Please try again in a few minutes."})
+				return
+			}
+		}
+		h(w, r, "try:"+id)
+	}
+}
+
+// allow is a fixed-window limit: 8 new searches per IP and 60 overall per hour.
+func (s *Service) allow(ip string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if now.Sub(s.window) > time.Hour {
+		s.window, s.perIP, s.total = now, map[string]int{}, 0
+	}
+	if s.perIP[ip] >= 8 || s.total >= 60 {
+		return false
+	}
+	s.perIP[ip]++
+	s.total++
+	return true
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, player string)
@@ -277,8 +333,12 @@ func (s *Service) gc() {
 
 // playerAgentName is a stable, opaque install name per player.
 func playerAgentName(player string) string {
+	prefix := "bb-"
+	if strings.HasPrefix(player, "try:") {
+		prefix = "web-"
+	}
 	sum := sha256.Sum256([]byte("bb-player:" + player))
-	return "bb-" + hex.EncodeToString(sum[:])[:16]
+	return prefix + hex.EncodeToString(sum[:])[:16]
 }
 
 func newID() string {
