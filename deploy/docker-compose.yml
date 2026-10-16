@@ -18,7 +18,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=app-net"
-      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`) || Host(`as.chipin.aauth.tech`)"
+      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`)"
       - "traefik.http.routers.chipin.entrypoints=websecure"
       - "traefik.http.routers.chipin.tls.certresolver=letsencrypt"
       - "traefik.http.services.chipin.loadbalancer.server.port=8080"
