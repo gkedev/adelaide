@@ -1,18 +1,21 @@
-# /docker/chipin/docker-compose.yml on the Hostinger VPS.
-# Source checked out at ./src; secrets in ./.env (chmod 600); keys in ./data.
 services:
   chipin:
     build: ./src
     image: chipin:latest
-    # Built here from ./src, never pulled: Hostinger Docker Manager pulls
-    # before deploying, and chipin:latest is on no registry.
     pull_policy: build
     container_name: chipin
     restart: always
-    env_file: .env
     environment:
       CHIPIN_ORIGIN: https://chipin.aauth.tech
       CHIPIN_PS: https://person.hello.coop
+      CHIPIN_PAY: ${CHIPIN_PAY}
+      CHIPIN_MAX_ORDER: ${CHIPIN_MAX_ORDER}
+      CHIPIN_ENROLLMENT_SECRET: ${CHIPIN_ENROLLMENT_SECRET}
+      CHIPIN_BB_API_KEY: ${CHIPIN_BB_API_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      KEYCARD_CLIENT_ID: ${KEYCARD_CLIENT_ID}
+      KEYCARD_CLIENT_SECRET: ${KEYCARD_CLIENT_SECRET}
+      KEYCARD_ZONE_ID: ${KEYCARD_ZONE_ID}
     networks:
       - app-net
     volumes:
