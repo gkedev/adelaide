@@ -4,6 +4,9 @@ services:
   chipin:
     build: ./src
     image: chipin:latest
+    # Built here from ./src, never pulled: Hostinger Docker Manager pulls
+    # before deploying, and chipin:latest is on no registry.
+    pull_policy: build
     container_name: chipin
     restart: always
     env_file: .env
