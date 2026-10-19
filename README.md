@@ -55,14 +55,16 @@ Each order line is sent as scopes (`brand:…`, `pack:…`, and `spend:within:us
 
 ## Supervisor mode
 
-`/supervisor/` runs the same agent under a **Supervisor** (draft-11 §4): the party that judges each act (the mission, each purchase) against the mission's intent and the log so far. Hellō has no missions yet, so here the agent's token names ChipIn's own person server (`internal/supervisor`, aauth-go `personserver`, at `chipin-ps.aauth.tech`). The agent proposes an AAuth mission there and sends a justification with each purchase. The Supervisor is either the person or a supervision server applying a parent's standing policy, which can:
+`/supervisor/` runs the same agent under a **Supervisor** (draft-11 §4). Hellō has no missions yet, so here the agent's token names ChipIn's own person server (`internal/supervisor`, aauth-go `personserver`, at `chipin-ps.aauth.tech`).
 
-- **approve**: one case within the auto-approve limit; the PS then federates to ChipIn's access server, and Keycard still applies;
-- **deny**: a second purchase when the log shows the mission is covered;
-- **escalate**: over the auto-approve limit, deferred (`requirement=approval`) until the person decides on the page;
-- **steer**: more than one case, sent back as a clarification question; the agent withdraws and re-requests one case.
+The Supervisor is the control plane, authorization only:
 
-The page shows the supervision log (hideable). The supervision protocol between a PS and a supervision server is not specified yet; here it is in process.
+- **Inputs:** the mission, the mission log (the person server's own), the person's policy, and the resource's requirement: the scope ChipIn signs into its resource token (`amount:usd:N order:<hash> cases:N`).
+- **Outputs:** **allow** (one case, within the auto-approve limit; the PS then federates to ChipIn's access server, where Keycard still applies), **deny** (the log already shows a purchase under the mission), **clarify** (more than one case: a question back to the agent, which withdraws and re-requests one case), **escalate** (over the limit: deferred, `requirement=approval`, until the person decides on the page).
+- **Per-act approval goes away; the accountable person does not.** The person approves the mission and their policy once, and is reached again only on escalation.
+- **Injected content cannot reach the decision.** The agent's justification is recorded and shown ("agent says, not an input"), never read by the policy. The "prompt-injected" behaviour on the page claims one pre-approved case while ordering two; the Supervisor clarifies from the signed requirement (`TestInjectionCannotReachTheDecision`).
+
+The page shows the supervision log (hideable), with each decision's inputs. The protocol between a PS and a supervision server is not specified yet; here the Supervisor is in process.
 
 ## Run
 

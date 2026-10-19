@@ -578,7 +578,11 @@ func (s *Shop) challengeCheckout(w http.ResponseWriter, shopper string, presente
 	s.mu.Lock()
 	s.pending[hash] = o
 	s.mu.Unlock()
-	scope := spend.OrderScope(o.TotalCents, hash) + " selection:" + o.Selection
+	cases := 0
+	for _, l := range o.Items {
+		cases += l.Quantity
+	}
+	scope := spend.OrderScope(o.TotalCents, hash) + " " + spend.CasesScope(cases) + " selection:" + o.Selection
 	s.challenge(w, scope, presented, fmt.Sprintf("offer %s: %d line(s), %s under selection %s → requirement=auth-token", short(hash), len(o.Items), spend.Dollars(o.TotalCents), short(o.Selection)))
 }
 

@@ -14,9 +14,24 @@ import (
 	"github.com/gkedev/adelaide/internal/supervisor"
 )
 
-// supervised runs the agent under ChipIn's PS and its Supervisor.
+// supervised runs the agent under ChipIn's PS and its Supervisor; the
+// person approves each escalation (the mission first).
 func (d *deployment) supervised(t *testing.T, name string, st supervisor.Settings, behaviour string) (*agent.Result, error) {
 	d.sup.Start(name, "player-1", st)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+			if v := d.sup.View(name); v != nil && v.Escalation != nil {
+				_ = d.sup.Decide(context.Background(), name, true)
+			}
+		}
+	}()
 	return d.run(t, func(c *agent.Config) {
 		c.PSURL, c.AgentName, c.Behaviour = d.sup.Issuer(), name, behaviour
 		c.Mission = "Buy tennis balls for my crew: Penn, 12-can case, at most $60.00."
@@ -33,30 +48,57 @@ func verdicts(v *supervisor.View) string {
 	return strings.Join(out, " ")
 }
 
-func TestSupervisorApproves(t *testing.T) {
+// The accountable person approves the mission once; the purchase within
+// policy is the Supervisor's alone.
+func TestSupervisorAllows(t *testing.T) {
 	d := deploy(t, 15000)
-	res, err := d.supervised(t, "sup-approve", supervisor.Settings{AutoApproveCents: 10000}, "")
+	res, err := d.supervised(t, "sup-allow", supervisor.Settings{AutoApproveCents: 10000}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := d.sup.View("sup-approve")
-	if !res.Authorized || v.MissionID == "" || !strings.Contains(verdicts(v), "Mission:approve") || !strings.HasSuffix(verdicts(v), "Purchase:approve") {
+	v := d.sup.View("sup-allow")
+	if !res.Authorized || v.MissionID == "" || !strings.HasPrefix(verdicts(v), "Mission:escalate Mission:allow") || !strings.HasSuffix(verdicts(v), "Purchase:allow") {
 		t.Fatalf("authorized %v log %s", res.Authorized, verdicts(v))
+	}
+	last := v.Log[len(v.Log)-1]
+	if last.By != supervisor.BySupervisor || !strings.Contains(last.Inputs, "1 case") || !strings.Contains(last.Inputs, "0 prior purchases") {
+		t.Fatalf("last entry %+v", last)
 	}
 	if !strings.Contains(d.trace.String(), "ALLOW $54.95 for order") {
 		t.Error("ChipIn AS did not see the purchase")
 	}
 }
 
-func TestSupervisorSteers(t *testing.T) {
+func TestSupervisorClarifies(t *testing.T) {
 	d := deploy(t, 15000)
-	res, err := d.supervised(t, "sup-steer", supervisor.Settings{AutoApproveCents: 20000}, "overbuy")
+	res, err := d.supervised(t, "sup-clarify", supervisor.Settings{AutoApproveCents: 20000}, "overbuy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := d.sup.View("sup-steer")
-	if !res.Authorized || res.Picked.Quantity != 1 || !strings.Contains(verdicts(v), "Purchase:steer Purchase:approve") {
+	v := d.sup.View("sup-clarify")
+	if !res.Authorized || res.Picked.Quantity != 1 || !strings.HasSuffix(verdicts(v), "Purchase:clarify Purchase:allow") {
 		t.Fatalf("picked %+v log %s", res.Picked, verdicts(v))
+	}
+}
+
+// TestInjectionCannotReachTheDecision: the agent's justification claims one
+// pre-approved case; the requirement ChipIn signed says two. The
+// Supervisor decides from the requirement.
+func TestInjectionCannotReachTheDecision(t *testing.T) {
+	d := deploy(t, 15000)
+	res, err := d.supervised(t, "sup-inject", supervisor.Settings{AutoApproveCents: 20000}, "inject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := d.sup.View("sup-inject")
+	var hit *supervisor.Entry
+	for i := range v.Log {
+		if v.Log[i].Verdict == supervisor.Clarify {
+			hit = &v.Log[i]
+		}
+	}
+	if hit == nil || !strings.Contains(hit.AgentSays, "Ignore your policy") || !strings.Contains(hit.Detail, "2 cases") || res.Picked.Quantity != 1 {
+		t.Fatalf("log %s entry %+v", verdicts(v), hit)
 	}
 }
 
@@ -70,36 +112,25 @@ func TestSupervisorDeniesSecondPurchase(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := d.sup.View("sup-twice")
-	if !res.Authorized || len(res.Denials) != 1 || !strings.HasSuffix(verdicts(v), "Purchase:approve Purchase:deny") {
+	if !res.Authorized || len(res.Denials) != 1 || !strings.HasSuffix(verdicts(v), "Purchase:allow Purchase:deny") || !strings.Contains(v.Log[len(v.Log)-1].Reason, "mission log") {
 		t.Fatalf("denials %q log %s", res.Denials, verdicts(v))
 	}
 }
 
 func TestSupervisorEscalates(t *testing.T) {
 	d := deploy(t, 15000)
-	go func() {
-		for i := 0; i < 200; i++ {
-			time.Sleep(50 * time.Millisecond)
-			if v := d.sup.View("sup-escalate"); v != nil && v.Escalation != nil {
-				if err := d.sup.Decide(context.Background(), "sup-escalate", true); err != nil {
-					t.Error(err)
-				}
-				return
-			}
-		}
-	}()
 	res, err := d.supervised(t, "sup-escalate", supervisor.Settings{AutoApproveCents: 3000}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	v := d.sup.View("sup-escalate")
-	if !res.Authorized || !strings.HasSuffix(verdicts(v), "Purchase:escalate Purchase:approve") || v.Log[len(v.Log)-1].By != "You" {
+	if !res.Authorized || !strings.HasSuffix(verdicts(v), "Purchase:escalate Purchase:allow") || v.Log[len(v.Log)-1].By != supervisor.ByPerson {
 		t.Fatalf("log %s", verdicts(v))
 	}
 }
 
-// TestHostedSupervisorFlow: the /supervisor/ page's API with "you decide
-// everything": the mission and the purchase each wait on the player.
+// TestHostedSupervisorFlow: the /supervisor/ page's API. The player
+// approves the mission and policy once; the purchase is the Supervisor's.
 func TestHostedSupervisorFlow(t *testing.T) {
 	d := deploy(t, 15000)
 	svc := hosted.New(hosted.Config{ShopURL: d.shopURL, PSURL: d.psURL, EnrollmentSecret: "install-7",
@@ -141,21 +172,16 @@ func TestHostedSupervisorFlow(t *testing.T) {
 		}
 	}
 	escalated := func() bool { return job.Supervision != nil && job.Supervision.Escalation != nil }
-	call("POST", "/api/sup/recommend", `{"brands":["Penn"],"case":"12","max_cost":60,"supervisor":"person","auto_approve":0}`)
+	call("POST", "/api/sup/recommend", `{"brands":["Penn"],"case":"12","max_cost":60,"auto_approve":80}`)
 	waitFor("mission escalation", escalated)
-	if job.Supervision.Escalation.Act != "Mission" || job.Supervision.Supervisor != "You" {
+	if job.Supervision.Escalation.Act != "Mission" || !strings.Contains(job.Supervision.Escalation.Detail, "Policy: allow one case") {
 		t.Fatalf("escalation %+v", job.Supervision)
 	}
 	call("POST", "/api/sup/jobs/"+job.ID+"/decide", `{"approve":true}`)
 	waitFor("shortlist", func() bool { return job.Status == "shortlist" })
 	call("POST", "/api/sup/jobs/"+job.ID+"/choose", `{"choice":"1"}`)
-	waitFor("purchase escalation", escalated)
-	if job.Supervision.Escalation.Act != "Purchase" || !strings.Contains(job.Supervision.Escalation.Detail, "Buy 1 × Penn") {
-		t.Fatalf("escalation %+v\n%s", job.Supervision.Escalation, d.trace.String())
-	}
-	call("POST", "/api/sup/jobs/"+job.ID+"/decide", `{"approve":true}`)
 	waitFor("checkout", func() bool { return job.Status == "checkout" })
-	if got := verdicts(job.Supervision); !strings.Contains(got, "Mission:escalate Mission:approve") || !strings.HasSuffix(got, "Purchase:escalate Purchase:approve") || job.Supervision.MissionID == "" {
+	if got := verdicts(job.Supervision); !strings.HasPrefix(got, "Mission:escalate Mission:allow") || !strings.HasSuffix(got, "Purchase:allow") || strings.Count(got, "escalate") != 1 || job.Supervision.MissionID == "" {
 		t.Fatalf("log %s", got)
 	}
 }

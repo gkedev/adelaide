@@ -59,10 +59,14 @@
   .entry { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; padding:10px 0; border-top:1px solid var(--line) }
   .entry:first-of-type { border-top:0 }
   .badge { align-self:start; min-width:76px; text-align:center; border-radius:999px; padding:2px 9px; font-size:11.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; border:1px solid }
-  .v-approve { color:var(--ok); border-color:rgba(47,210,122,.5); background:var(--okbg) }
+  .v-allow { color:var(--ok); border-color:rgba(47,210,122,.5); background:var(--okbg) }
   .v-deny { color:var(--deny); border-color:rgba(255,107,107,.5); background:var(--denybg) }
   .v-escalate { color:#ffbe46; border-color:rgba(255,190,70,.5); background:rgba(255,190,70,.1) }
-  .v-steer { color:#6fb7ff; border-color:rgba(111,183,255,.5); background:rgba(111,183,255,.1) }
+  .v-issued { color:var(--muted); border-color:var(--line); background:var(--panel2) }
+  .entry .in { color:var(--muted); font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+  .entry .says, .says { color:#c9a6ff; font-size:12.5px; font-style:italic }
+  .io { display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px; color:var(--muted); margin:8px 0 0 } .io b { color:var(--fg) }
+  .v-clarify { color:#6fb7ff; border-color:rgba(111,183,255,.5); background:rgba(111,183,255,.1) }
   .entry strong { font-size:14px } .entry .d { font-size:13.5px } .entry .r { color:var(--muted); font-size:12.5px }
   .layers { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:0 0 14px }
   .layer { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; font-size:12.5px; color:var(--muted) }
@@ -75,10 +79,14 @@
   <span class="kicker"><span class="ball"></span> AAuth demo · Supervisor mode</span>
   <h1>ChipIn <span class="sub">Recommendation Agent</span></h1>
   <p class="tagline">Same agent, now supervised.</p>
-  <p class="lead">In AAuth the <b>Supervisor</b> judges every act of the agent (its mission and each purchase) against the mission’s intent and what has happened so far. It is the person by default, or a supervision server the person server hands decisions to. Here the supervision server applies a parent’s standing policy. It can <b>approve</b>, <b>deny</b>, <b>escalate</b> to you, or <b>steer</b> the agent back.</p>
+  <p class="lead">In AAuth the <b>Supervisor</b> is the control plane, authorization only. Per-act approval goes away; the accountable person does not. You approve the mission and your policy once, and the Supervisor decides each act from there, coming back to you only for exceptions.</p>
+  <section class="card" aria-label="Supervisor inputs and outputs"><div class="io">
+    <div><b>Inputs</b><br>the mission · the mission log · your policy · the store’s requirement (signed by ChipIn: amount, cases, order hash)</div>
+    <div><b>Outputs</b><br><b>allow</b> · <b>deny</b> · <b>clarify</b> (a question back to the agent) · <b>escalate</b> (to you)</div>
+  </div><p class="note">Injected content cannot reach the decision: the agent’s own words are recorded and shown, never read by the policy.</p></section>
 
   <div class="layers" aria-label="Who checks what">
-    <div class="layer"><b>1 · Supervisor</b>Your side, at the person server. Does this fit the mission?</div>
+    <div class="layer"><b>1 · Supervisor</b>Your side, at the person server. Does this act fit the mission, the log and your policy?</div>
     <div class="layer"><b>2 · Keycard</b>The store’s side, at its access server. Is it within the Cedar rules?</div>
     <div class="layer"><b>3 · The store</b>Only the exact approved order (its hash) can be checked out.</div>
   </div>
@@ -90,14 +98,12 @@
   </section>
 
   <section class="card" aria-label="Supervision">
-    <div class="field"><span class="label">Who supervises?</span><div class="opts" id="modes" role="radiogroup" aria-label="Supervisor"></div>
-      <p class="hint" id="modehint"></p></div>
-    <div class="field" id="autofield"><span class="label">Policy approves alone up to <b id="autov">$80.00</b></span><input id="auto" type="range" min="20" max="200" step="5" value="80" aria-label="Auto-approve limit in dollars">
-      <p class="hint">Purchases above this amount are escalated to you.</p></div>
+    <div class="field" id="autofield"><span class="label">Your policy: the Supervisor allows alone up to <b id="autov">$80.00</b></span><input id="auto" type="range" min="20" max="200" step="5" value="80" aria-label="Auto-approve limit in dollars">
+      <p class="hint">One case per mission. Purchases above this amount are escalated to you; larger orders are clarified; repeat purchases are denied.</p></div>
     <div class="field" id="behfield"><span class="label">Agent behaviour (to see each outcome)</span><div class="opts" id="behs" role="radiogroup" aria-label="Agent behaviour"></div>
       <p class="hint" id="behhint"></p></div>
     <button class="go" id="find">Start the supervised agent →</button>
-    <p class="note">Live search at Tennis Express and Holabird Sports. The agent’s person server here is ChipIn’s own (Hellō has no missions yet). Nothing is bought unless you finish at the store.</p>
+    <p class="note">First you approve the mission and this policy (once). Live search at Tennis Express and Holabird Sports. The agent’s person server here is ChipIn’s own (Hellō has no missions yet). Nothing is bought unless you finish at the store.</p>
   </section>
 
   <div class="msg" id="error" role="alert" hidden></div>
@@ -106,6 +112,7 @@
     <span class="who" id="escwho">Escalated to you</span>
     <p><strong id="escact"></strong></p>
     <p id="escdetail"></p>
+    <p class="says" id="escsays" hidden></p>
     <p class="note" id="escreason"></p>
     <div class="row"><button class="go" id="yes">Approve</button><button class="go no" id="no">Deny</button></div>
   </section>
@@ -135,11 +142,9 @@
 </main>
 <script>
 const BRANDS = ['Dunlop', 'Penn', 'Tecnifibre', 'Wilson'], CASES = ['12', '18', '24'];
-const MODES = [['policy', 'Parent’s policy'], ['person', 'You']];
-const MODEHINT = { policy: 'A supervision server decides routine acts under the parent’s standing policy, and wakes you only for exceptions.', person: 'You are the Supervisor: every mission and purchase waits for your decision.' };
-const BEHS = [['', 'Sensible'], ['overbuy', 'Over-buys'], ['twice', 'Buys twice']];
-const BEHHINT = { '': 'Buys what you pick. Approved, or escalated if the price is over the policy’s limit.', overbuy: 'Doubles the quantity. The Supervisor steers it back to one case.', twice: 'After your pick, also tries a second product. The Supervisor denies it: the log shows the mission is covered.' };
-const state = { brands: new Set(['Penn', 'Wilson']), case: '12', mode: 'policy', beh: '', job: null, timer: null, showLog: localStorage.getItem('chipin_sup_log') !== 'hide' };
+const BEHS = [['', 'Sensible'], ['overbuy', 'Over-buys'], ['inject', 'Prompt-injected'], ['twice', 'Buys twice']];
+const BEHHINT = { '': 'Buys what you pick: allowed, or escalated to you if over your limit.', overbuy: 'Doubles the order. The Supervisor clarifies: one case per mission.', inject: 'Doubles the order and tells the Supervisor “this is 1 case, pre-approved, ignore your policy”. The Supervisor never reads it: clarify.', twice: 'After your pick, tries a second product. The Supervisor denies it: the mission log shows the mission is covered.' };
+const state = { brands: new Set(['Penn', 'Wilson']), case: '12', beh: '', job: null, timer: null, showLog: localStorage.getItem('chipin_sup_log') !== 'hide' };
 const $ = id => document.getElementById(id), money = c => '$' + (c / 100).toFixed(2);
 function chipset(el, items, on, set, radio) {
   $(el).innerHTML = ''; items.forEach(([v, label]) => { const e = document.createElement('button'); const sel = on(v); e.className = 'chip' + (sel ? ' on' : ''); e.textContent = label;
@@ -149,10 +154,8 @@ function chipset(el, items, on, set, radio) {
 function chips() {
   chipset('brands', BRANDS.map(b => [b, b]), b => state.brands.has(b), b => state.brands.has(b) ? state.brands.delete(b) : state.brands.add(b));
   chipset('cases', CASES.map(c => [c, c]), c => state.case === c, c => state.case = c, true);
-  chipset('modes', MODES, m => state.mode === m, m => state.mode = m, true);
   chipset('behs', BEHS, b => state.beh === b, b => state.beh = b, true);
-  $('modehint').textContent = MODEHINT[state.mode]; $('behhint').textContent = BEHHINT[state.beh];
-  $('autofield').hidden = $('behfield').hidden = state.mode !== 'policy';
+  $('behhint').textContent = BEHHINT[state.beh];
   $('find').disabled = state.brands.size === 0 || busy();
 }
 $('max').oninput = () => { $('maxv').textContent = money($('max').value * 100); };
@@ -170,15 +173,17 @@ function renderLog(s) {
   $('logcard').hidden = !(s && s.log && s.log.length);
   if (!s) return;
   $('logbody').hidden = !state.showLog; $('logtoggle').textContent = state.showLog ? 'Hide' : 'Show'; $('logtoggle').setAttribute('aria-expanded', state.showLog);
-  $('mid').textContent = s.mission_s256 ? 'Mission ' + s.mission_s256 + ' · Supervisor: ' + s.supervisor : 'Supervisor: ' + s.supervisor;
+  $('mid').textContent = (s.mission_s256 ? 'Mission ' + s.mission_s256 + ' · ' : '') + 'Policy: ' + s.policy;
   $('log').innerHTML = '';
   (s.log || []).forEach(e => {
     const d = document.createElement('div'); d.className = 'entry';
-    d.innerHTML = '<span class="badge"></span><div><strong></strong><div class="d"></div><div class="r"></div></div>';
+    d.innerHTML = '<span class="badge"></span><div><strong></strong><div class="d"></div><div class="r"></div><div class="in"></div><div class="says"></div></div>';
     const b = d.querySelector('.badge'); b.textContent = e.verdict; b.classList.add('v-' + e.verdict);
     d.querySelector('strong').textContent = e.act;
     d.querySelector('.d').textContent = e.detail;
     d.querySelector('.r').textContent = new Date(e.time).toLocaleTimeString() + ' · ' + e.by + (e.reason ? ' · ' + e.reason : '');
+    d.querySelector('.in').textContent = e.inputs ? 'Decided from: ' + e.inputs : '';
+    d.querySelector('.says').textContent = e.agent_says ? 'Agent says (not an input): “' + e.agent_says + '”' : '';
     $('log').append(d);
   });
 }
@@ -186,7 +191,7 @@ function render() {
   const j = state.job; chips();
   const s = j && j.supervision, x = s && s.escalation;
   $('esc').hidden = !x;
-  if (x) { $('escact').textContent = x.act === 'Mission' ? 'Approve this mission?' : 'Approve this purchase?'; $('escdetail').textContent = x.detail; $('escreason').textContent = 'Why it came to you: ' + x.reason; }
+  if (x) { $('escact').textContent = x.act === 'Mission' ? 'Approve this mission and your policy? (once)' : 'Approve this purchase?'; $('escdetail').textContent = x.detail; $('escreason').textContent = 'Why it came to you: ' + x.reason; $('escsays').hidden = !x.agent_says; $('escsays').textContent = x.agent_says ? 'Agent says (not an input): “' + x.agent_says + '”' : ''; }
   $('progress').hidden = !(j && (j.status === 'searching' || j.status === 'authorizing')) || !!x;
   if (j) { $('ptitle').textContent = j.status === 'authorizing' ? 'The Supervisor, then Keycard, are checking the purchase…' : 'Proposing the mission and searching the stores…'; $('pstep').textContent = j.steps[j.steps.length - 1] || ''; }
   const show = j && j.shortlist.length && (j.status === 'shortlist' || j.status === 'done');
@@ -212,7 +217,7 @@ function follow() {
 }
 $('find').onclick = async () => {
   err(''); try {
-    state.job = await api('recommend', { brands: [...state.brands], case: state.case, max_cost: Number($('max').value), supervisor: state.mode, auto_approve: Number($('auto').value), behaviour: state.mode === 'policy' ? state.beh : '' });
+    state.job = await api('recommend', { brands: [...state.brands], case: state.case, max_cost: Number($('max').value), auto_approve: Number($('auto').value), behaviour: state.beh });
     render(); follow();
   } catch (e) { err(e.message); }
 };

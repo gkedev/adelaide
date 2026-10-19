@@ -2,32 +2,31 @@
 // the /supervisor/ demo (AAuth draft -11 §4 "Supervisor", §8 missions).
 //
 // Hellō, the person server of the main demo, has no missions. Here the
-// agent's token names this PS instead: the agent proposes a mission, and
-// every act under it (the mission itself, each purchase) is evaluated by
-// the Supervisor against the mission's intent and the log so far. The
-// Supervisor is either the person ("you decide everything") or a
-// supervision server applying the parent's standing policy, which answers
-// one of four ways:
+// agent's token names this PS instead. The Supervisor is the control plane,
+// authorization only:
 //
-//   - approve: within policy, the PS issues the token (and federates the
-//     purchase to ChipIn's access server, where Keycard still applies);
-//   - deny: against the mission's intent, refused at the PS;
-//   - escalate: outside what the policy may decide alone, deferred
-//     (requirement=approval) until the person decides on the demo page;
-//   - steer: sent back to the agent as a clarification question
-//     (requirement=clarification); the agent withdraws and corrects.
+//   - inputs: the mission, the mission log, the person's policy, and the
+//     resource's requirement (the scope ChipIn signs into its resource
+//     token: amount, case count, order hash);
+//   - outputs: allow, deny, clarify (a question back to the agent; it
+//     withdraws and corrects), or escalate (deferred, requirement=approval,
+//     until the person decides).
 //
-// The supervision protocol between a PS and a supervision server is not
-// specified yet (a companion specification is TBD); here it is in process.
+// Per-act approval goes away; the accountable person does not: the person
+// approves the mission and their policy once, and is reached again only on
+// escalation. Injected content cannot reach the decision: the agent's
+// justification is recorded and shown, never read by the policy.
+//
+// The protocol between a PS and a supervision server is not specified yet
+// (a companion specification is TBD); here the Supervisor is in process.
 package supervisor
 
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,49 +38,56 @@ import (
 	"github.com/gkedev/adelaide/internal/spend"
 )
 
-// Supervisor modes.
+// Verdicts in the log. Issued marks a person server event that is not a
+// supervision decision (identity).
 const (
-	ModePolicy = "policy" // the parent's standing policy (a supervision server)
-	ModePerson = "person" // the person decides every act
-)
-
-// Verdicts in the log.
-const (
-	Approve  = "approve"
+	Allow    = "allow"
 	Deny     = "deny"
+	Clarify  = "clarify"
 	Escalate = "escalate"
-	Steer    = "steer"
+	Issued   = "issued"
 )
 
-// Settings are a session's supervision choices.
+// Who decides.
+const (
+	BySupervisor = "Supervisor (parent’s policy)"
+	ByPerson     = "You"
+	ByPS         = "Person server"
+)
+
+// Settings are the person's policy for a session.
 type Settings struct {
-	Mode string `json:"mode"`
-	// AutoApproveCents is the most the policy approves without the person.
+	// AutoApproveCents is the most the Supervisor allows without the person.
 	AutoApproveCents int64 `json:"auto_approve_cents"`
 }
 
 // Entry is one line of the supervision log.
 type Entry struct {
 	Time    time.Time `json:"time"`
-	Act     string    `json:"act"`     // what was asked: "Mission", "Purchase", "Identity", "Keycard mission"
-	Detail  string    `json:"detail"`  // the request, as the agent or resource put it
-	Verdict string    `json:"verdict"` // approve, deny, escalate, steer
-	By      string    `json:"by"`      // who decided
+	Act     string    `json:"act"`     // Mission, Purchase, Keycard mission, Identity
+	Detail  string    `json:"detail"`  // the act, from the resource's requirement
+	Verdict string    `json:"verdict"` // allow, deny, clarify, escalate, issued
+	By      string    `json:"by"`
 	Reason  string    `json:"reason,omitempty"`
+	// Inputs is what the decision was made from.
+	Inputs string `json:"inputs,omitempty"`
+	// AgentSays is the agent's justification: recorded and shown, never an
+	// input to the decision.
+	AgentSays string `json:"agent_says,omitempty"`
 }
 
 // Escalation is a decision waiting on the person.
 type Escalation struct {
-	ID     string `json:"id"`
-	Act    string `json:"act"`
-	Detail string `json:"detail"`
-	Reason string `json:"reason"`
+	ID        string `json:"id"`
+	Act       string `json:"act"`
+	Detail    string `json:"detail"`
+	Reason    string `json:"reason"`
+	AgentSays string `json:"agent_says,omitempty"`
 }
 
 // View is what the demo page shows.
 type View struct {
-	Mode       string      `json:"mode"`
-	Supervisor string      `json:"supervisor"`
+	Policy     string      `json:"policy"`
 	Mission    string      `json:"mission,omitempty"`
 	MissionID  string      `json:"mission_s256,omitempty"`
 	Log        []Entry     `json:"log"`
@@ -94,7 +100,6 @@ type session struct {
 	mission   string
 	missionID string
 	log       []Entry
-	bought    []string // approved purchases, for the policy's context
 	pending   *Escalation
 	nextAsk   *Escalation // set by a decision that escalates, claimed by Notify
 }
@@ -147,12 +152,13 @@ func (s *Service) Issuer() string { return s.issuer }
 
 // Start opens a session for an agent install acting for person.
 func (s *Service) Start(agentName, person string, st Settings) {
-	if st.Mode != ModePerson {
-		st.Mode = ModePolicy
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[agentName] = &session{person: person, settings: st}
+}
+
+func policyText(st Settings) string {
+	return fmt.Sprintf("allow one case per mission up to %s; escalate above; clarify oversized orders; deny repeat purchases", spend.Dollars(st.AutoApproveCents))
 }
 
 // View returns the session's supervision state.
@@ -163,8 +169,7 @@ func (s *Service) View(agentName string) *View {
 	if ss == nil {
 		return nil
 	}
-	v := &View{Mode: ss.settings.Mode, Supervisor: supervisorName(ss.settings.Mode), Mission: ss.mission, MissionID: ss.missionID,
-		Log: append([]Entry{}, ss.log...)}
+	v := &View{Policy: policyText(ss.settings), Mission: ss.mission, MissionID: ss.missionID, Log: append([]Entry{}, ss.log...)}
 	if ss.pending != nil {
 		e := *ss.pending
 		v.Escalation = &e
@@ -188,36 +193,17 @@ func (s *Service) Decide(ctx context.Context, agentName string, approve bool) er
 	if approve {
 		err = s.PS.Approve(ctx, e.ID, personserver.Grant{Person: person})
 	} else {
-		err = s.PS.Deny(ctx, e.ID, "The person declined: "+e.Detail)
+		err = s.PS.Deny(ctx, e.ID, "declined by the person")
 	}
 	if err != nil {
 		return err
 	}
-	verdict, reason := Approve, "you approved"
+	verdict, reason := Allow, "you approved"
 	if !approve {
 		verdict, reason = Deny, "you declined"
 	}
-	s.mu.Lock()
-	if approve && e.Act == "Purchase" {
-		ss.bought = append(ss.bought, e.Detail)
-	}
-	s.mu.Unlock()
-	s.entry(agentName, Entry{Act: e.Act, Detail: e.Detail, Verdict: verdict, By: "You", Reason: reason})
+	s.entry(agentName, Entry{Act: e.Act, Detail: e.Detail, Verdict: verdict, By: ByPerson, Reason: reason})
 	return nil
-}
-
-// End drops a session.
-func (s *Service) End(agentName string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, agentName)
-}
-
-func supervisorName(mode string) string {
-	if mode == ModePerson {
-		return "You"
-	}
-	return "Parent’s policy (supervision server)"
 }
 
 func (s *Service) entry(agentName string, e Entry) {
@@ -250,11 +236,12 @@ func (s *Service) sessionFor(agent *aauth.AgentClaims) (string, *session) {
 
 // escalate defers to the person: the page shows the request, and
 // [Service.Decide] resolves it.
-func (s *Service) escalate(name string, ss *session, act, detail, reason string) personserver.Decision {
+func (s *Service) escalate(name string, ss *session, e Entry) personserver.Decision {
 	s.mu.Lock()
-	ss.nextAsk = &Escalation{Act: act, Detail: detail, Reason: reason}
+	ss.nextAsk = &Escalation{Act: e.Act, Detail: e.Detail, Reason: e.Reason, AgentSays: e.AgentSays}
 	s.mu.Unlock()
-	s.entry(name, Entry{Act: act, Detail: detail, Verdict: Escalate, By: supervisorName(ss.settings.Mode), Reason: reason})
+	e.Verdict = Escalate
+	s.entry(name, e)
 	return personserver.DeferApproval()
 }
 
@@ -276,28 +263,24 @@ func (s *Service) notify(_ context.Context, p *personserver.Pending) {
 	}
 }
 
+// decideMission: the accountable person approves the mission and their
+// policy once. Updates and completions within it are the Supervisor's.
 func (s *Service) decideMission(_ context.Context, r *personserver.MissionRequest) (personserver.Decision, error) {
 	name, ss := s.sessionFor(r.Agent)
 	if ss == nil {
 		return personserver.Deny("no supervised session for this agent"), nil
 	}
 	if r.Kind != personserver.KindMissionProposal {
-		s.entry(name, Entry{Act: "Mission", Detail: "mission " + string(r.Kind), Verdict: Approve, By: supervisorName(ss.settings.Mode)})
+		s.entry(name, Entry{Act: "Mission", Detail: "mission " + string(r.Kind), Verdict: Allow, By: BySupervisor})
 		return personserver.Allow(personserver.Grant{Person: ss.person}), nil
 	}
 	desc := r.Proposal.Description
 	s.mu.Lock()
 	ss.mission = desc
+	st := ss.settings
 	s.mu.Unlock()
-	if ss.settings.Mode == ModePerson {
-		return s.escalate(name, ss, "Mission", desc, "you supervise every decision"), nil
-	}
-	if !strings.Contains(strings.ToLower(desc), "tennis balls") {
-		s.entry(name, Entry{Act: "Mission", Detail: desc, Verdict: Deny, By: supervisorName(ss.settings.Mode), Reason: "the standing policy covers tennis balls only"})
-		return personserver.Deny("the standing policy covers tennis balls only"), nil
-	}
-	s.entry(name, Entry{Act: "Mission", Detail: desc, Verdict: Approve, By: supervisorName(ss.settings.Mode), Reason: "tennis balls for the crew: within the standing policy"})
-	return personserver.Allow(personserver.Grant{Person: ss.person}), nil
+	return s.escalate(name, ss, Entry{Act: "Mission", Detail: desc + " Policy: " + policyText(st) + ".",
+		By: BySupervisor, Reason: "a new mission and its policy need the accountable person, once"}), nil
 }
 
 // MissionApproved records the approved mission's identifier for display.
@@ -309,15 +292,59 @@ func (s *Service) MissionApproved(agentName, s256 string) {
 	}
 }
 
-var quantity = regexp.MustCompile(`^Buy (\d+) × `)
-
-// Justification writes the purchase justification the agent sends (and the
-// policy reads, as the agent's claim): "Buy N × title (pack) at store".
-func Justification(qty int, title, pack, store string) string {
-	return fmt.Sprintf("Buy %d × %s (%s) at %s", qty, title, pack, store)
+// priorPurchases are the purchases the mission log shows authorized: auth
+// tokens issued under the mission for an order.
+func (s *Service) priorPurchases(ctx context.Context, s256 string) []string {
+	entries, err := s.PS.MissionLog(ctx, s256)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.Kind != personserver.LogTokenRequest {
+			continue
+		}
+		var b struct {
+			Type  string `json:"type"`
+			Scope string `json:"scope"`
+		}
+		if json.Unmarshal(e.Body, &b) != nil || b.Type != "auth_token" {
+			continue
+		}
+		if amount, ok := spend.AmountFromScope(b.Scope); ok {
+			out = append(out, orderText(amount, b.Scope))
+		}
+	}
+	return out
 }
 
-func (s *Service) decideToken(_ context.Context, r *personserver.TokenRequest) (personserver.Decision, error) {
+// orderText describes an order from its scope alone.
+func orderText(amount int64, scope string) string {
+	t := spend.Dollars(amount)
+	if n, ok := spend.CasesFromScope(scope); ok {
+		t += fmt.Sprintf(" · %d case%s", n, plural(n))
+	}
+	if h := spend.OrderFromScope(scope); h != "" {
+		t += " · order " + short(h)
+	}
+	return t
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func short(h string) string {
+	if len(h) > 10 {
+		return h[:10] + "…"
+	}
+	return h
+}
+
+func (s *Service) decideToken(ctx context.Context, r *personserver.TokenRequest) (personserver.Decision, error) {
 	name, ss := s.sessionFor(r.Agent)
 	if ss == nil {
 		return personserver.Deny("no supervised session for this agent"), nil
@@ -326,60 +353,47 @@ func (s *Service) decideToken(_ context.Context, r *personserver.TokenRequest) (
 	if r.Person == "" {
 		g.Person = ss.person
 	}
-	by := supervisorName(ss.settings.Mode)
 	if r.Kind == personserver.KindPersonToken {
-		s.entry(name, Entry{Act: "Identity", Detail: "person token for " + r.Resource, Verdict: Approve, By: "ChipIn PS", Reason: "the agent acts for you under the mission"})
+		// Identity, not authorization: the PS's own event.
+		s.entry(name, Entry{Act: "Identity", Detail: "person token for " + r.Resource, Verdict: Issued, By: ByPS})
 		return personserver.Allow(g), nil
 	}
 	amount, isPayment := spend.AmountFromScope(r.Scope)
 	if !isPayment {
-		// Publishing the mission to Keycard (mission:approve): the person
-		// already approved the mission it implements.
-		s.entry(name, Entry{Act: "Keycard mission", Detail: "publish your choices to Keycard", Verdict: Approve, By: by, Reason: "implements the approved mission"})
+		s.entry(name, Entry{Act: "Keycard mission", Detail: "publish your choices to Keycard", Verdict: Allow, By: BySupervisor,
+			Reason: "implements the approved mission", Inputs: "mission · requirement scope"})
 		return personserver.Allow(g), nil
 	}
 	if r.Mission == nil {
-		s.entry(name, Entry{Act: "Purchase", Detail: spend.Dollars(amount), Verdict: Deny, By: "ChipIn PS", Reason: "no mission"})
+		s.entry(name, Entry{Act: "Purchase", Detail: spend.Dollars(amount), Verdict: Deny, By: BySupervisor, Reason: "no mission"})
 		return personserver.Deny("purchases need an approved mission"), nil
 	}
-	claim := r.Hints.Justification
-	if claim == "" {
-		claim = "an order"
-	}
-	detail := fmt.Sprintf("%s, %s", claim, spend.Dollars(amount))
-	if ss.settings.Mode == ModePerson {
-		return s.escalate(name, ss, "Purchase", detail, "you supervise every decision"), nil
-	}
+	// The decision's inputs: mission, log, policy, requirement. Nothing
+	// the agent wrote is among them.
+	cases, _ := spend.CasesFromScope(r.Scope)
+	prior := s.priorPurchases(ctx, r.Mission.S256)
 	s.mu.Lock()
-	bought := append([]string{}, ss.bought...)
+	limit := ss.settings.AutoApproveCents
 	s.mu.Unlock()
-	switch qty := justifiedQuantity(claim); {
-	case len(bought) > 0:
-		reason := "the mission is already covered: " + bought[0]
-		s.entry(name, Entry{Act: "Purchase", Detail: detail, Verdict: Deny, By: by, Reason: reason})
-		return personserver.Deny(reason), nil
-	case qty > 1:
-		reason := fmt.Sprintf("%d cases is more than the crew needs; one case covers the mission", qty)
-		s.entry(name, Entry{Act: "Purchase", Detail: detail, Verdict: Steer, By: by, Reason: reason})
-		return personserver.DeferClarification(reason+". Reduce the order to 1 case?", "Reduce to 1 case", "Withdraw"), nil
-	case amount > ss.settings.AutoApproveCents:
-		return s.escalate(name, ss, "Purchase", detail, fmt.Sprintf("over the %s the policy approves alone", spend.Dollars(ss.settings.AutoApproveCents))), nil
+	e := Entry{Act: "Purchase", Detail: orderText(amount, r.Scope), By: BySupervisor, AgentSays: r.Hints.Justification,
+		Inputs: fmt.Sprintf("requirement (signed by ChipIn): %s · log: %d prior purchase%s · policy: up to %s · mission %s",
+			orderText(amount, r.Scope), len(prior), plural(len(prior)), spend.Dollars(limit), short(r.Mission.S256))}
+	switch {
+	case len(prior) > 0:
+		e.Verdict, e.Reason = Deny, "the mission log shows it is covered: "+prior[0]
+		s.entry(name, e)
+		return personserver.Deny(e.Reason), nil
+	case cases > 1:
+		e.Verdict, e.Reason = Clarify, fmt.Sprintf("%d cases; the policy allows one case per mission", cases)
+		s.entry(name, e)
+		return personserver.DeferClarification(e.Reason+". Reduce the order to 1 case?", "Reduce to 1 case", "Withdraw"), nil
+	case amount > limit:
+		e.Reason = fmt.Sprintf("over the %s the policy allows alone", spend.Dollars(limit))
+		return s.escalate(name, ss, e), nil
 	}
-	s.entry(name, Entry{Act: "Purchase", Detail: detail, Verdict: Approve, By: by,
-		Reason: fmt.Sprintf("one case, within the %s auto-approve limit", spend.Dollars(ss.settings.AutoApproveCents))})
-	s.mu.Lock()
-	ss.bought = append(ss.bought, detail)
-	s.mu.Unlock()
+	e.Verdict, e.Reason = Allow, fmt.Sprintf("one case, within %s, first purchase of the mission", spend.Dollars(limit))
+	s.entry(name, e)
 	return personserver.Allow(g), nil
-}
-
-func justifiedQuantity(j string) int {
-	m := quantity.FindStringSubmatch(j)
-	if m == nil {
-		return 1
-	}
-	n, _ := strconv.Atoi(m[1])
-	return n
 }
 
 type federator struct{ f personserver.Federator }

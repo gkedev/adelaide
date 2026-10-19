@@ -34,6 +34,24 @@ func OrderScope(cents int64, orderHash string) string {
 	return CheckoutScope(cents) + " order:" + orderHash
 }
 
+// CasesScope is the resource-asserted size of an order, in cases (cart
+// units), added to an order scope: "cases:2". A Supervisor decides from it
+// rather than from the agent's own description of the order.
+func CasesScope(n int) string { return fmt.Sprintf("cases:%d", n) }
+
+// CasesFromScope returns the case count a scope names, and false if none.
+func CasesFromScope(scope string) (int, bool) {
+	for _, s := range strings.Fields(scope) {
+		if v, ok := strings.CutPrefix(s, "cases:"); ok {
+			var n int
+			if _, err := fmt.Sscan(v, &n); err == nil && n > 0 {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // OrderFromScope returns the order hash a scope names, or "".
 func OrderFromScope(scope string) string {
 	for _, s := range strings.Fields(scope) {

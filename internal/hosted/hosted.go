@@ -207,8 +207,7 @@ func (s *Service) recommend(w http.ResponseWriter, r *http.Request, player strin
 		Case    string   `json:"case"`
 		MaxCost float64  `json:"max_cost"`
 		// Supervisor demo only.
-		Supervisor  string  `json:"supervisor"`   // policy or person
-		AutoApprove float64 `json:"auto_approve"` // USD the policy approves alone
+		AutoApprove float64 `json:"auto_approve"` // USD the person's policy allows alone
 		Behaviour   string  `json:"behaviour"`    // "", overbuy, twice
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil || len(in.Brands) == 0 || in.Case == "" || in.MaxCost <= 0 || in.MaxCost > 1000 {
@@ -222,13 +221,13 @@ func (s *Service) recommend(w http.ResponseWriter, r *http.Request, player strin
 	var sup *supRun
 	if supervised {
 		switch in.Behaviour {
-		case "", "overbuy", "twice":
+		case "", "overbuy", "inject", "twice":
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown agent behaviour"})
 			return
 		}
 		sup = &supRun{behaviour: in.Behaviour}
-		s.cfg.Sup.Start(job.agentName, player, supervisor.Settings{Mode: in.Supervisor, AutoApproveCents: int64(in.AutoApprove*100 + 0.5)})
+		s.cfg.Sup.Start(job.agentName, player, supervisor.Settings{AutoApproveCents: int64(in.AutoApprove*100 + 0.5)})
 	}
 	s.mu.Lock()
 	s.gc()
