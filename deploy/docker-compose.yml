@@ -8,7 +8,6 @@ services:
     environment:
       CHIPIN_ORIGIN: https://chipin.aauth.tech
       CHIPIN_PS: https://person.hello.coop
-      CHIPIN_SUP_PS: https://chipin-ps.aauth.tech
       CHIPIN_PAY: ${CHIPIN_PAY}
       CHIPIN_MAX_ORDER: ${CHIPIN_MAX_ORDER}
       CHIPIN_ENROLLMENT_SECRET: ${CHIPIN_ENROLLMENT_SECRET}
@@ -25,7 +24,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=app-net"
-      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`) || Host(`chipin-ps.aauth.tech`)"
+      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`)"
       - "traefik.http.routers.chipin.entrypoints=websecure"
       - "traefik.http.routers.chipin.tls.certresolver=letsencrypt"
       - "traefik.http.services.chipin.loadbalancer.server.port=8080"

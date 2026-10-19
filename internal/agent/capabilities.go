@@ -26,9 +26,6 @@ type capabilityRT struct {
 	capabilities []string
 	agent        *aauth.Agent
 	base         http.RoundTripper
-	// justification, when it points at a non-empty string, is added to the
-	// same requests (TokenRequestHints.Justification, §7.4).
-	justification *string
 }
 
 // RoundTrip adds capabilities, then (with CHIPIN_DEBUG_PS=1) logs the
@@ -82,9 +79,6 @@ func (c capabilityRT) roundTrip(r *http.Request) (*http.Response, error) {
 		return base.RoundTrip(r)
 	}
 	m["capabilities"] = c.capabilities
-	if c.justification != nil && *c.justification != "" && m["justification"] == nil {
-		m["justification"] = *c.justification
-	}
 	if body, err = json.Marshal(m); err != nil {
 		return nil, err
 	}

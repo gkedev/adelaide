@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -46,9 +45,6 @@ type Config struct {
 	ShopURL string
 	// PS is the person server the agents' tokens name: Hellō in the live demo.
 	PS string
-	// SupervisedPS, when set, is the person server named instead for agent
-	// installs whose name starts with "sup-" (the Supervisor demo).
-	SupervisedPS string
 	// AgentDomain is the domain of the agent identifiers issued.
 	AgentDomain string
 	// APKey and ASKey are the signing keys (generated when nil).
@@ -121,7 +117,7 @@ func New(cfg Config) (*Roles, error) {
 		Key:        cfg.APKey,
 		Registrar:  enrollment{r},
 		OnIssue: func(_ context.Context, it agentprovider.IssuedToken) {
-			cfg.Log("ChipIn AP", "issued agent token to "+it.Claims.Subject+" (ps "+it.Claims.PS+")")
+			cfg.Log("ChipIn AP", "issued agent token to "+it.Claims.Subject+" (ps "+cfg.PS+")")
 		},
 	})
 	if err != nil {
@@ -219,11 +215,7 @@ func (e enrollment) AuthorizeIssue(_ context.Context, req *http.Request, _ *agen
 		}
 		name = n
 	}
-	ps := e.r.cfg.PS
-	if e.r.cfg.SupervisedPS != "" && strings.HasPrefix(name, "sup-") {
-		ps = e.r.cfg.SupervisedPS
-	}
-	return &agentprovider.Registration{Name: name, PS: ps}, nil
+	return &agentprovider.Registration{Name: name, PS: e.r.cfg.PS}, nil
 }
 
 func (enrollment) AuthorizeRefresh(context.Context, *agentprovider.RefreshRequest) (*agentprovider.Registration, error) {
