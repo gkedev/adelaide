@@ -721,6 +721,11 @@ func (s *Shop) propose(ctx context.Context, shopper string, c selection.Criteria
 	if err != nil {
 		return nil, err
 	}
+	// A new mission starts with an empty cart: lines left from an earlier
+	// run (authorized but never paid) must not join this order.
+	s.mu.Lock()
+	delete(s.carts, shopper)
+	s.mu.Unlock()
 	var all []ucp.Offer
 	src := "live (UCP)"
 	// Each chosen brand, plus pack-size searches: stores' search ranking

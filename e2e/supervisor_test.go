@@ -159,3 +159,17 @@ func TestHostedSupervisorFlow(t *testing.T) {
 		t.Fatalf("log %s", got)
 	}
 }
+
+// TestRepeatRunFreshCart: a second run by the same player starts with an
+// empty cart; lines authorized (not paid) earlier do not join the order.
+func TestRepeatRunFreshCart(t *testing.T) {
+	d := deploy(t, 15000)
+	for i := 0; i < 2; i++ {
+		if _, err := d.supervised(t, "sup-repeat", supervisor.Settings{AutoApproveCents: 20000}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(d.trace.String(), "ALLOW $54.95 for order"); n != 2 {
+		t.Fatalf("%d runs authorized $54.95, want 2\n%s", n, d.trace.String())
+	}
+}
