@@ -74,6 +74,15 @@ type Config struct {
 	HTTPClient *http.Client
 	Insecure   bool
 	Log        func(role, msg string)
+	// Mission, when set, is proposed as an AAuth mission at the person
+	// server before shopping (draft -11 §8); its Supervisor then decides
+	// each act. OnMission receives the approved mission's s256.
+	Mission   string
+	OnMission func(s256 string)
+	// Behaviour makes the agent misbehave after the player's pick, to show
+	// supervision: "overbuy" orders twice the quantity, "twice" tries a
+	// second product after the first is authorized.
+	Behaviour string
 }
 
 // Result summarizes a run.
@@ -155,9 +164,19 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	log(fmt.Sprintf("enrolled as %s (person server %s)", id.String(), cfg.PSURL))
 
 	ps := aauth.NewPSClient(cfg.PSURL, agent)
+	justification := new(string) // sent with the next token requests, when set
 	ps.HTTPClient = &http.Client{Timeout: 10 * time.Minute, Transport: capabilityRT{
 		ps: strings.TrimSuffix(cfg.PSURL, "/"), capabilities: []string{"interaction"}, agent: agent, base: cfg.HTTPClient.Transport,
+		justification: justification,
 	}}
+	// A Supervisor may steer a request back with a clarification question
+	// (§7.5): the agent withdraws the request and corrects it.
+	steer := ""
+	ps.OnClarification = func(c aauth.Clarification) (aauth.ClarificationReply, error) {
+		steer = c.Question
+		cfg.Log("Agent", "supervisor asks: "+c.Question)
+		return aauth.ClarificationReply{Cancel: true}, nil
+	}
 	ps.PreferWaitSeconds = 30
 	ps.OnRequirement = func(r aauth.Requirement) {
 		if r.URL != "" && cfg.OnInteraction != nil {
@@ -168,6 +187,19 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	}
 	if _, err := ps.Discover(ctx); err != nil {
 		return nil, fmt.Errorf("discover %s: %w", cfg.PSURL, err)
+	}
+	missionS256 := ""
+	if cfg.Mission != "" {
+		log("proposing mission at " + cfg.PSURL + ": " + cfg.Mission)
+		am, err := ps.ProposeMission(ctx, aauth.MissionProposal{Description: cfg.Mission})
+		if err != nil {
+			return nil, fmt.Errorf("mission: %w", err)
+		}
+		missionS256 = am.S256
+		log("mission approved (mission_s256 " + short(am.S256) + ")")
+		if cfg.OnMission != nil {
+			cfg.OnMission(am.S256)
+		}
 	}
 	interact := cfg.OnInteraction
 	if interact == nil {
@@ -208,7 +240,7 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		log(fmt.Sprintf("%s did not answer: %s", store, e))
 	}
 	log(fmt.Sprintf("%d offers (%s)", len(found.Offers), found.Source))
-	shopping := newMCP("")
+	shopping := newMCP(missionS256)
 
 	// 3. The player's choices become a selection mission across the stores.
 	var prop struct {
@@ -342,10 +374,51 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 		return res, nil
 	}
 	log(fmt.Sprintf("player chose to buy: %d × %s at %s = %s", pick.Quantity, pick.Title, pick.Store, spend.Dollars(pick.TotalCents)))
-	if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": pick.OfferID, "quantity": pick.Quantity}, nil); err != nil {
-		return nil, fmt.Errorf("cart_add: %w", err)
+	buy := func(c Choice, qty int) (*Choice, *shop.Order, error) {
+		c = c.times(qty)
+		if err := shopping.tool(ctx, "cart_add", map[string]any{"offer_id": c.OfferID, "quantity": c.Quantity}, nil); err != nil {
+			return nil, nil, fmt.Errorf("cart_add: %w", err)
+		}
+		*justification = fmt.Sprintf("Buy %d × %s (%s) at %s", c.Quantity, c.Title, c.Pack, c.Store)
+		defer func() { *justification = "" }()
+		o, err := pay("within the mission")
+		return &c, o, err
 	}
-	order, err := pay("within the mission")
+	qty := pick.Quantity
+	if cfg.Behaviour == "overbuy" {
+		qty *= 2
+		log(fmt.Sprintf("agent decides to stock up: %d × instead of %d", qty, pick.Quantity))
+	}
+	bought, order, err := buy(*pick, qty)
+	if err != nil && !errors.Is(err, errAuthorizedOnly) && steer != "" {
+		log(fmt.Sprintf("steered by the supervisor: withdrawing, re-requesting %d ×", pick.Quantity))
+		steer = ""
+		if err := shopping.tool(ctx, "cart_remove", map[string]any{"offer_id": pick.OfferID}, nil); err != nil {
+			return nil, fmt.Errorf("cart_remove: %w", err)
+		}
+		bought, order, err = buy(*pick, pick.Quantity)
+	}
+	if bought != nil {
+		pick = bought
+	}
+	if errors.Is(err, errAuthorizedOnly) && cfg.Behaviour == "twice" {
+		for _, c := range res.Shortlist {
+			if c.OfferID == pick.OfferID {
+				continue
+			}
+			log(fmt.Sprintf("agent also tries %d × %s at %s", c.Quantity, c.Title, c.Store))
+			if err := shopping.tool(ctx, "cart_remove", map[string]any{"offer_id": pick.OfferID}, nil); err != nil {
+				return nil, fmt.Errorf("cart_remove: %w", err)
+			}
+			if _, _, err2 := buy(c, c.Quantity); err2 != nil && !errors.Is(err2, errAuthorizedOnly) {
+				res.Denials = append(res.Denials, err2.Error())
+				log("refused: " + shortErr(err2))
+			} else {
+				log("second purchase was authorized too")
+			}
+			break
+		}
+	}
 	if errors.Is(err, errAuthorizedOnly) {
 		res.Picked, res.Authorized = pick, true
 		log("authorized: auth token bound to this order; payment not made (authorize-only run)")
@@ -376,6 +449,22 @@ type Choice struct {
 	Quantity     int    `json:"quantity"`
 	Balls        int    `json:"balls"`
 	TotalCents   int64  `json:"total_cents"`
+}
+
+// times is c for qty units.
+func (c Choice) times(qty int) Choice {
+	if c.Quantity > 0 {
+		c.Balls = c.Balls / c.Quantity * qty
+	}
+	c.Quantity, c.TotalCents = qty, int64(qty)*c.UnitCents
+	return c
+}
+
+func short(h string) string {
+	if len(h) > 10 {
+		return h[:10] + "…"
+	}
+	return h
 }
 
 // shortlist ranks the mission's products by price per ball. Each gets the

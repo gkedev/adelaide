@@ -53,6 +53,17 @@ Each order line is sent as scopes (`brand:…`, `pack:…`, and `spend:within:us
 | `mission_propose`, `cart_*`, `checkout_quote` | person token |
 | `mission_approve`, `checkout_authorize`, `checkout_pay` | auth token for exactly that mission or order |
 
+## Supervisor mode
+
+`/supervisor/` runs the same agent under a **Supervisor** (draft-11 §4): the party that judges each act (the mission, each purchase) against the mission's intent and the log so far. Hellō has no missions yet, so here the agent's token names ChipIn's own person server (`internal/supervisor`, aauth-go `personserver`, at `chipin-ps.aauth.tech`). The agent proposes an AAuth mission there and sends a justification with each purchase. The Supervisor is either the person or a supervision server applying a parent's standing policy, which can:
+
+- **approve**: one case within the auto-approve limit; the PS then federates to ChipIn's access server, and Keycard still applies;
+- **deny**: a second purchase when the log shows the mission is covered;
+- **escalate**: over the auto-approve limit, deferred (`requirement=approval`) until the person decides on the page;
+- **steer**: more than one case, sent back as a clarification question; the agent withdraws and re-requests one case.
+
+The page shows the supervision log (hideable). The supervision protocol between a PS and a supervision server is not specified yet; here it is in process.
+
 ## Run
 
 Go 1.26+.

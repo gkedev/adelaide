@@ -33,6 +33,7 @@ import (
 	"github.com/gkedev/adelaide/internal/agent"
 	"github.com/gkedev/adelaide/internal/keys"
 	"github.com/gkedev/adelaide/internal/spend"
+	"github.com/gkedev/adelaide/internal/supervisor"
 	"github.com/gkedev/adelaide/internal/ucp"
 )
 
@@ -47,6 +48,9 @@ type Config struct {
 	Log              func(role, msg string)
 	// Insecure accepts http://localhost identifiers (tests only).
 	Insecure bool
+	// Sup, when set, serves /api/sup/*: the Supervisor demo, where the
+	// agent's person server is ChipIn's own and a Supervisor decides.
+	Sup *supervisor.Service
 }
 
 // Service is the hosted agent API.
@@ -72,7 +76,11 @@ type Job struct {
 	Picked      *agent.Choice  `json:"picked,omitempty"`
 	Checkout    *ucp.Checkout  `json:"checkout,omitempty"`
 	Steps       []string       `json:"steps"`
+	// Supervision is the Supervisor demo's state: the log and any decision
+	// waiting on the player.
+	Supervision *supervisor.View `json:"supervision,omitempty"`
 	player      string
+	agentName   string
 	decide      chan string
 	updated     time.Time
 }
@@ -100,6 +108,30 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/try/recommend", s.visitor(true, s.recommend))
 	mux.HandleFunc("GET /api/try/jobs/{id}", s.visitor(false, s.get))
 	mux.HandleFunc("POST /api/try/jobs/{id}/choose", s.visitor(false, s.choose))
+	if s.cfg.Sup != nil {
+		mux.HandleFunc("POST /api/sup/recommend", s.visitor(true, s.recommend))
+		mux.HandleFunc("GET /api/sup/jobs/{id}", s.visitor(false, s.get))
+		mux.HandleFunc("POST /api/sup/jobs/{id}/choose", s.visitor(false, s.choose))
+		mux.HandleFunc("POST /api/sup/jobs/{id}/decide", s.visitor(false, s.decide))
+	}
+}
+
+// decide is the player's answer to an escalation from their Supervisor.
+func (s *Service) decide(w http.ResponseWriter, r *http.Request, player string) {
+	job := s.job(r.PathValue("id"), player)
+	if job == nil || s.cfg.Sup == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such search"})
+		return
+	}
+	var in struct {
+		Approve bool `json:"approve"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&in)
+	if err := s.cfg.Sup.Decide(r.Context(), job.agentName, in.Approve); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.view(job))
 }
 
 const tryCookie = "chipin_try"
@@ -174,18 +206,35 @@ func (s *Service) recommend(w http.ResponseWriter, r *http.Request, player strin
 		Brands  []string `json:"brands"`
 		Case    string   `json:"case"`
 		MaxCost float64  `json:"max_cost"`
+		// Supervisor demo only.
+		Supervisor  string  `json:"supervisor"`   // policy or person
+		AutoApprove float64 `json:"auto_approve"` // USD the policy approves alone
+		Behaviour   string  `json:"behaviour"`    // "", overbuy, twice
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil || len(in.Brands) == 0 || in.Case == "" || in.MaxCost <= 0 || in.MaxCost > 1000 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "choose brands, a case size, and a max cost"})
 		return
 	}
 	id := newID()
+	supervised := strings.HasPrefix(r.URL.Path, "/api/sup/")
 	job := &Job{ID: id, Status: "searching", Recommended: -1, player: player, decide: make(chan string, 1), updated: time.Now()}
+	job.agentName = playerAgentName(player, supervised)
+	var sup *supRun
+	if supervised {
+		switch in.Behaviour {
+		case "", "overbuy", "twice":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown agent behaviour"})
+			return
+		}
+		sup = &supRun{behaviour: in.Behaviour}
+		s.cfg.Sup.Start(job.agentName, player, supervisor.Settings{Mode: in.Supervisor, AutoApproveCents: int64(in.AutoApprove*100 + 0.5)})
+	}
 	s.mu.Lock()
 	s.gc()
 	s.jobs[id] = job
 	s.mu.Unlock()
-	go s.run(job, in.Brands, in.Case, int64(in.MaxCost*100+0.5))
+	go s.run(job, in.Brands, in.Case, int64(in.MaxCost*100+0.5), sup)
 	writeJSON(w, http.StatusAccepted, s.view(job))
 }
 
@@ -239,6 +288,9 @@ func (s *Service) view(j *Job) Job {
 	c := *j
 	// Lists are always JSON arrays, never null: the BB page reads .length.
 	c.Steps = append(make([]string, 0, len(j.Steps)), j.Steps...)
+	if s.cfg.Sup != nil && strings.HasPrefix(j.agentName, "sup-") {
+		c.Supervision = s.cfg.Sup.View(j.agentName)
+	}
 	if c.Shortlist == nil {
 		c.Shortlist = []agent.Choice{}
 	}
@@ -252,11 +304,14 @@ func (s *Service) update(j *Job, f func(*Job)) {
 	j.updated = time.Now()
 }
 
+// supRun is a supervised run's extras.
+type supRun struct{ behaviour string }
+
 // run is one recommendation, start to finish.
-func (s *Service) run(job *Job, brands []string, caseSize string, maxCents int64) {
+func (s *Service) run(job *Job, brands []string, caseSize string, maxCents int64, sup *supRun) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	name := playerAgentName(job.player)
+	name := job.agentName
 	key, err := keys.LoadOrCreate(s.cfg.KeysDir, name, aauth.AlgEd25519)
 	if err != nil {
 		s.fail(job, err)
@@ -268,7 +323,7 @@ func (s *Service) run(job *Job, brands []string, caseSize string, maxCents int64
 			s.update(job, func(j *Job) { j.Steps = append(j.Steps, msg) })
 		}
 	}
-	res, err := agent.Run(ctx, agent.Config{
+	cfg := agent.Config{
 		ShopURL: s.cfg.ShopURL, APURL: s.cfg.ShopURL, PSURL: s.cfg.PSURL, EnrollmentSecret: s.cfg.EnrollmentSecret,
 		Key: key, AgentName: name,
 		Case: caseSize, Brands: brands, BudgetCents: maxCents, TargetBalls: 24,
@@ -288,7 +343,13 @@ func (s *Service) run(job *Job, brands []string, caseSize string, maxCents int64
 				return "none"
 			}
 		},
-	})
+	}
+	if sup != nil {
+		cfg.PSURL, cfg.Behaviour = s.cfg.Sup.Issuer(), sup.behaviour
+		cfg.Mission = fmt.Sprintf("Buy tennis balls for my crew: %s, %s-can case, at most %s.", strings.Join(brands, " or "), caseSize, spend.Dollars(maxCents))
+		cfg.OnMission = func(s256 string) { s.cfg.Sup.MissionApproved(name, s256) }
+	}
+	res, err := agent.Run(ctx, cfg)
 	if err != nil {
 		s.fail(job, err)
 		return
@@ -332,12 +393,18 @@ func (s *Service) gc() {
 }
 
 // playerAgentName is a stable, opaque install name per player.
-func playerAgentName(player string) string {
+// Supervised installs are "sup-…": the agent provider names ChipIn's own
+// person server for them.
+func playerAgentName(player string, supervised bool) string {
 	prefix := "bb-"
 	if strings.HasPrefix(player, "try:") {
 		prefix = "web-"
 	}
-	sum := sha256.Sum256([]byte("bb-player:" + player))
+	seed := "bb-player:" + player
+	if supervised {
+		prefix, seed = "sup-", "sup-player:"+player
+	}
+	sum := sha256.Sum256([]byte(seed))
 	return prefix + hex.EncodeToString(sum[:])[:16]
 }
 

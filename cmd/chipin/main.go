@@ -41,6 +41,7 @@ import (
 	"github.com/gkedev/adelaide/internal/payments"
 	"github.com/gkedev/adelaide/internal/shop"
 	"github.com/gkedev/adelaide/internal/spend"
+	"github.com/gkedev/adelaide/internal/supervisor"
 	"github.com/gkedev/adelaide/internal/trust"
 	"github.com/gkedev/adelaide/internal/ucp"
 )
@@ -150,10 +151,24 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	if insecure {
 		domain = "agents.chipin.localhost"
 	}
+	// The Supervisor demo's person server, on its own origin.
+	var sup *supervisor.Service
+	if u := os.Getenv("CHIPIN_SUP_PS"); u != "" && !insecure {
+		if sup, err = supervisor.New(u, hc, false, log); err != nil {
+			return nil, err
+		}
+	}
+	trusted := []string{ps, origin}
+	supURL := ""
+	if sup != nil {
+		supURL = sup.Issuer()
+		trusted = append(trusted, supURL)
+	}
 	var sh *shop.Shop
 	roles, err := trust.New(trust.Config{
-		Authorize: func(scope, ps, sub string) error { return sh.Authorize(scope, ps, sub) },
-		Issuer:    origin, ShopURL: origin, PS: ps, AgentDomain: domain,
+		SupervisedPS: supURL,
+		Authorize:    func(scope, ps, sub string) error { return sh.Authorize(scope, ps, sub) },
+		Issuer:       origin, ShopURL: origin, PS: ps, AgentDomain: domain,
 		APKey: apKey, ASKey: asKey,
 		DailyBudgetCents: cents(o.dailyBudget), MaxOrderCents: cents(o.maxOrder),
 		EnrollmentSecret: o.enrollment, HTTPClient: hc, Insecure: insecure, Log: log,
@@ -180,7 +195,7 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 			ClientSecret: os.Getenv("KEYCARD_CLIENT_SECRET"), Origin: origin}
 	}
 	sh, err = shop.New(shop.Config{
-		Keycard: kc, Key: shopKey, URL: origin, AccessServer: origin, TrustedIssuers: []string{ps, origin},
+		Keycard: kc, Key: shopKey, URL: origin, AccessServer: origin, TrustedIssuers: trusted,
 		Catalog: catalog, Stripe: stripe, HTTPClient: hc, Insecure: insecure, Log: log,
 	})
 	if err != nil {
@@ -195,7 +210,7 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 			agentsDir = filepath.Join(o.data, "agents")
 		}
 		hosted.New(hosted.Config{APIKey: key, ShopURL: origin, PSURL: ps, EnrollmentSecret: o.enrollment,
-			KeysDir: agentsDir, Catalog: catalog, Log: log}).Register(mux)
+			KeysDir: agentsDir, Catalog: catalog, Log: log, Sup: sup}).Register(mux)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	// The site's front door is the demo walkthrough.
@@ -208,8 +223,19 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 		mux.Handle("/", staticSite(o.public)) // no method in the pattern: it would conflict with aauth-go's routes
 	}
 	// Demo service: keep every page and endpoint out of search engines.
+	var psMux *http.ServeMux
+	psHost := ""
+	if sup != nil {
+		psMux = http.NewServeMux()
+		sup.PS.Register(psMux)
+		psHost = strings.TrimPrefix(sup.Issuer(), "https://")
+	}
 	noindex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		if psMux != nil && r.Host == psHost {
+			psMux.ServeHTTP(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 	return &host{shop: sh, handler: noindex}, nil

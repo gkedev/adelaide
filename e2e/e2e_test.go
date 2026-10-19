@@ -22,6 +22,7 @@ import (
 	"github.com/gkedev/adelaide/internal/payments"
 	"github.com/gkedev/adelaide/internal/selection"
 	"github.com/gkedev/adelaide/internal/shop"
+	"github.com/gkedev/adelaide/internal/supervisor"
 	"github.com/gkedev/adelaide/internal/trust"
 	"github.com/gkedev/adelaide/internal/ucp"
 )
@@ -133,6 +134,7 @@ type deployment struct {
 	trace          *strings.Builder
 	log            func(string, string)
 	catalog        *ucp.Client
+	sup            *supervisor.Service // ChipIn's own PS with a Supervisor
 }
 
 func deploy(t *testing.T, maxOrderCents int64) *deployment { return deployWith(t, maxOrderCents, nil) }
@@ -160,11 +162,19 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	psMux := http.NewServeMux()
 	ps.Register(psMux)
 	*psH = psMux
+	supSrv, supH := server(t)
+	sup, err := supervisor.New(supSrv.URL, hc, true, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supMux := http.NewServeMux()
+	sup.PS.Register(supMux)
+	*supH = supMux
 
 	var sh *shop.Shop
 	roles, err := trust.New(trust.Config{
 		Authorize: func(scope, ps, sub string) error { return sh.Authorize(scope, ps, sub) },
-		Issuer:    chipSrv.URL, PS: psSrv.URL, AgentDomain: "agents.chipin.localhost",
+		Issuer:    chipSrv.URL, PS: psSrv.URL, SupervisedPS: supSrv.URL, AgentDomain: "agents.chipin.localhost",
 		MaxOrderCents: maxOrderCents, EnrollmentSecret: "install-7",
 		HTTPClient: hc, Insecure: true, Log: log,
 	})
@@ -192,7 +202,7 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 		st = live
 	}
 	sh, err = shop.New(shop.Config{
-		URL: chipSrv.URL, AccessServer: chipSrv.URL, TrustedIssuers: []string{psSrv.URL, chipSrv.URL},
+		URL: chipSrv.URL, AccessServer: chipSrv.URL, TrustedIssuers: []string{psSrv.URL, supSrv.URL, chipSrv.URL},
 		Catalog: catalog, Stripe: st, HTTPClient: hc, Insecure: true, Log: log,
 	})
 	if err != nil {
@@ -202,7 +212,7 @@ func deployWith(t *testing.T, maxOrderCents int64, live *payments.Stripe) *deplo
 	roles.Register(mux)
 	sh.Register(mux)
 	*chipH = mux
-	d := &deployment{shopURL: chipSrv.URL, psURL: psSrv.URL, shop: sh, stripe: fs, wallet: st, trace: trace, log: log, catalog: catalog}
+	d := &deployment{shopURL: chipSrv.URL, psURL: psSrv.URL, shop: sh, stripe: fs, wallet: st, trace: trace, log: log, catalog: catalog, sup: sup}
 	return d
 }
 
