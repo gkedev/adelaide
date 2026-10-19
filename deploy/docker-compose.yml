@@ -1,12 +1,12 @@
 services:
-  chipin:
+  chipin-supervisor:
     build: ./src
-    image: chipin:latest
+    image: chipin-supervisor:latest
     pull_policy: build
-    container_name: chipin
+    container_name: chipin-supervisor
     restart: always
     environment:
-      CHIPIN_ORIGIN: https://chipin.aauth.tech
+      CHIPIN_ORIGIN: https://chipin-supervisor.aauth.tech
       CHIPIN_PS: https://person.hello.coop
       CHIPIN_SUP_PS: https://chipin-ps.aauth.tech
       CHIPIN_PAY: ${CHIPIN_PAY}
@@ -25,10 +25,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=app-net"
-      - "traefik.http.routers.chipin.rule=Host(`chipin.aauth.tech`) || Host(`chipin-ps.aauth.tech`)"
-      - "traefik.http.routers.chipin.entrypoints=websecure"
-      - "traefik.http.routers.chipin.tls.certresolver=letsencrypt"
-      - "traefik.http.services.chipin.loadbalancer.server.port=8080"
+      - "traefik.http.routers.chipin-supervisor.rule=Host(`chipin-supervisor.aauth.tech`) || Host(`chipin-ps.aauth.tech`)"
+      - "traefik.http.routers.chipin-supervisor.entrypoints=websecure"
+      - "traefik.http.routers.chipin-supervisor.tls.certresolver=letsencrypt"
+      - "traefik.http.services.chipin-supervisor.loadbalancer.server.port=8080"
 
 networks:
   app-net:

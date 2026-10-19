@@ -55,6 +55,8 @@ Each order line is sent as scopes (`brand:…`, `pack:…`, and `spend:within:us
 
 ## Supervisor mode
 
+Experimental, on branch `supervisor`, deployed separately at **https://chipin-supervisor.aauth.tech** (`deploy/docker-compose.yml` here is that service). `main` stays the basic four-party demo with Hellō at https://chipin.aauth.tech/try/.
+
 `/supervisor/` runs the same agent under a **Supervisor** (draft-11 §4). Hellō has no missions yet, so here the agent's token names ChipIn's own person server (`internal/supervisor`, aauth-go `personserver`, at `chipin-ps.aauth.tech`).
 
 The Supervisor is the control plane, authorization only:

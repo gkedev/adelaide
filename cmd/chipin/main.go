@@ -214,7 +214,17 @@ func newHost(o options, origin, ps string, stripe *payments.Stripe, hc *http.Cli
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	// The site's front door is the demo walkthrough.
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/flow/", http.StatusFound) })
+	home := "/flow/"
+	if sup != nil {
+		// The Supervisor deployment is its own demo: its front door is
+		// /supervisor/, and the basic pages live at the four-party demo.
+		home = "/supervisor/"
+		basic := env("CHIPIN_BASIC_URL", "https://chipin.aauth.tech")
+		for _, p := range []string{"/try/", "/flow/", "/sequence/"} {
+			mux.Handle("GET "+p, http.RedirectHandler(basic+p, http.StatusFound))
+		}
+	}
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, home, http.StatusFound) })
 	mux.HandleFunc("GET /robots.txt", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
